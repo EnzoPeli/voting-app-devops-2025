@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket         = "voting-app-terraform-state-177816"  # pon aquí exactamente el valor de $TF_STATE_BUCKET
+    bucket         = "voting-app-terraform-state-177816"
     key            = "voting-app/terraform.tfstate"
     region         = var.aws_region
     dynamodb_table = "terraform-locks"
