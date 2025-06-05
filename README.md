@@ -4,6 +4,20 @@
 
 ![Estado inicial del Kanban](docs/initial-kanban.png)
 
+## Infraestructura Dev
+
+Después de aplicar Terraform en el entorno Dev, se crearon los siguientes recursos en AWS:
+
+1. **VPC**: bloque CIDR `10.0.0.0/16` con DNS habilitado.  
+2. **Subnets Públicas**: dos subnets (`10.0.1.0/24` y `10.0.2.0/24`) en distintas Availability Zones.  
+3. **Internet Gateway** y tabla de rutas asociada para permitir tráfico saliente.  
+4. **Security Group**: permite tráfico HTTP (puerto 80) y SSH (22) desde `0.0.0.0/0`.
+
+![Infraestructura Dev](docs/infra-dev.png)
+
+> **Nota**: La captura anterior muestra la VPC y sus subnets en AWS Console, confirmando que Terraform aplicó correctamente los recursos en el entorno Dev.
+
+
 ## Ramas principales
 
 ### main
