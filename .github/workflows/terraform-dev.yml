@@ -1,4 +1,4 @@
-name: "Terraform Plan (Dev)"
+name: "Terraform Plan & Apply (Dev)"
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   terraform:
-    name: Terraform Plan on Dev
+    name: Terraform Plan & Apply on Dev
     runs-on: ubuntu-latest
 
     steps:
@@ -19,6 +19,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Set up Terraform
@@ -30,6 +31,11 @@ jobs:
         working-directory: infra
         run: terraform init
 
-      - name: Terraform Plan
+      - name: Terraform Plan (Dev)
         working-directory: infra
         run: terraform plan -var-file=dev.tfvars
+
+      - name: Terraform Apply (Dev)
+        if: github.ref == 'refs/heads/develop'
+        working-directory: infra
+        run: terraform apply -auto-approve -var-file=dev.tfvars
