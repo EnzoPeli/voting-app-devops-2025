@@ -32,7 +32,7 @@ module "ecr_result" {
 
 module "ecr_seed" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-seed"
+  name   = "voting-app-seed-data"
   tags   = var.tags
 }
 

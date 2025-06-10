@@ -15,7 +15,7 @@ jobs:
 
     strategy:
       matrix:
-        service: [ vote, result, seed, worker ]
+        service: [ vote, result, seed-data, worker ]
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
