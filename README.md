@@ -64,3 +64,23 @@ git push origin feature/infra-<descripción>
 1. Validar develop (tests, plan, deploy en Dev y Test)
 2. Aprobar PR develop → main
 3. Opcionalmente, añadir tag en main (ej: `v1.0-infra`)
+
+
+# Validación de Dockerfiles
+
+- **app/vote**  
+  - Se construye y sirve correctamente en `localhost:8080`.  
+- **app/result**  
+  - Se construye y sirve correctamente en `localhost:5000`.  
+- **app/seed-data**  
+  - Es un job que corre y termina sin exponer HTTP.  
+- **app/worker**  
+  - Arranca correctamente, pero se queda en:
+    ```
+    Waiting for db
+    Waiting for db
+    …
+    ```
+    Esto es porque el worker **depende** de que exista un servicio de base de datos al que conectarse. Hay que levantar primero el contenedor de DB para que finalice el arranque.
+
+**Conclusión**: Todos los Dockerfiles son válidos. La única dependencia extra es la DB para el worker.
