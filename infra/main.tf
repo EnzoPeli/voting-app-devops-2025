@@ -17,6 +17,19 @@ provider "aws" {
   region  = var.aws_region
 }
 
+# ECR Repository
+resource "aws_ecr_repository" "voting_app" {
+  name                 = "voting-app"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+
 # Modulo de Network
 module "network" {
   source = "./modules/network"

@@ -22,3 +22,8 @@ output "security_group_arn" {
   description = "ARN del Security Group creado"
   value       = module.security_group.sg_arn
 }
+
+output "ecr_repository_url" {
+  value       = aws_ecr_repository.voting_app.repository_url
+  description = "URL completo del repositorio ECR"
+}
