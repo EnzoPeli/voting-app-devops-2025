@@ -2,8 +2,7 @@ name: Docker Build & Push (Dev)
 
 on:
   push:
-    branches:
-      - develop
+    branches: [ develop ]
 
 jobs:
   docker:
@@ -13,8 +12,10 @@ jobs:
     env:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       AWS_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
-      ECR_REPOSITORY: voting-app
 
+    strategy:
+      matrix:
+        service: [ vote, result, seed, worker ]
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -29,32 +30,13 @@ jobs:
 
       - name: Login to ECR
         run: |
-          aws ecr get-login-password \
-            --region $AWS_REGION \
-            | docker login \
-              --username AWS \
-              --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin \
+              $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-      - name: Build and push vote service
+      - name: Build and push ${{ matrix.service }} service
         run: |
-          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-vote:dev
-          docker build -t $IMAGE_TAG -f app/vote/Dockerfile app/vote
-          docker push $IMAGE_TAG
-
-      - name: Build and push result service
-        run: |
-          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-result:dev
-          docker build -t $IMAGE_TAG -f app/result/Dockerfile app/result
-          docker push $IMAGE_TAG
-
-      - name: Build and push seed-data service
-        run: |
-          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-seed:dev
-          docker build -t $IMAGE_TAG -f app/seed-data/Dockerfile app/seed-data
-          docker push $IMAGE_TAG
-
-      - name: Build and push worker service
-        run: |
-          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-worker:dev
-          docker build -t $IMAGE_TAG -f app/worker/Dockerfile app/worker
+          REPO_NAME=voting-app-${{ matrix.service }}
+          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPO_NAME:dev
+          docker build -t $IMAGE_TAG -f app/${{ matrix.service }}/Dockerfile app/${{ matrix.service }}
           docker push $IMAGE_TAG
