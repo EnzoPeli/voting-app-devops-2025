@@ -17,16 +17,29 @@ provider "aws" {
   region  = var.aws_region
 }
 
-# ECR Repository
-resource "aws_ecr_repository" "voting_app" {
-  name                 = "voting-app"
-  image_tag_mutability = "MUTABLE"
+# ECR Repositories
+module "ecr_vote" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-vote"
+  tags   = var.tags
+}
 
-  image_scanning_configuration {
-    scan_on_push = true
-  }
+module "ecr_result" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-result"
+  tags   = var.tags
+}
 
-  tags = var.tags
+module "ecr_seed" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-seed"
+  tags   = var.tags
+}
+
+module "ecr_worker" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-worker"
+  tags   = var.tags
 }
 
 
