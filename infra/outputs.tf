@@ -23,7 +23,22 @@ output "security_group_arn" {
   value       = module.security_group.sg_arn
 }
 
-output "ecr_repository_url" {
-  value       = aws_ecr_repository.voting_app.repository_url
+output "ecr_vote_url" {
+  value       = module.ecr_vote.repository_url
+  description = "URL completo del repositorio ECR"
+}
+
+output "ecr_result_url" {
+  value       = module.ecr_result.repository_url
+  description = "URL completo del repositorio ECR"
+}
+
+output "ecr_seed_url" {
+  value       = module.ecr_seed.repository_url
+  description = "URL completo del repositorio ECR"
+}
+
+output "ecr_worker_url" {
+  value       = module.ecr_worker.repository_url
   description = "URL completo del repositorio ECR"
 }
