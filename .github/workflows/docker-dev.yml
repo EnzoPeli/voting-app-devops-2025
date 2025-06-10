@@ -1,0 +1,59 @@
+name: Docker Build & Push (Dev)
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  docker:
+    name: Build and push images to ECR
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      AWS_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
+      ECR_REPOSITORY: voting-app
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password \
+            --region $AWS_REGION \
+            | docker login \
+              --username AWS \
+              --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      - name: Build and push vote service
+        run: |
+          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-vote:dev
+          docker build -t $IMAGE_TAG -f app/vote/Dockerfile app/vote
+          docker push $IMAGE_TAG
+
+      - name: Build and push result service
+        run: |
+          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-result:dev
+          docker build -t $IMAGE_TAG -f app/result/Dockerfile app/result
+          docker push $IMAGE_TAG
+
+      - name: Build and push seed-data service
+        run: |
+          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-seed:dev
+          docker build -t $IMAGE_TAG -f app/seed-data/Dockerfile app/seed-data
+          docker push $IMAGE_TAG
+
+      - name: Build and push worker service
+        run: |
+          IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/${ECR_REPOSITORY}-worker:dev
+          docker build -t $IMAGE_TAG -f app/worker/Dockerfile app/worker
+          docker push $IMAGE_TAG
