@@ -84,3 +84,9 @@ git push origin feature/infra-<descripción>
     Esto es porque el worker **depende** de que exista un servicio de base de datos al que conectarse. Hay que levantar primero el contenedor de DB para que finalice el arranque.
 
 **Conclusión**: Todos los Dockerfiles son válidos. La única dependencia extra es la DB para el worker.
+
+
+
+## Pruebas locales con Docker Compose
+
+Para levantar y probar todo el stack usar la guía en [docs/docker-compose.md](docs/docker-compose.md).
