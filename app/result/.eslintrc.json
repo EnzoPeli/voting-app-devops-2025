@@ -23,6 +23,9 @@
   "ignorePatterns": [
     "node_modules/**",
     "views/*.min.js",
-    "**/*.min.js"
+    "**/*.min.js",
+    "tests/**",
+    "views/socket.io.js",
+    "**/socket.io.js"
   ]
 }
