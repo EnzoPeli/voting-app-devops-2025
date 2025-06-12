@@ -6,16 +6,22 @@ on:
 
 jobs:
   docker:
-    name: Build and push images to ECR
     runs-on: ubuntu-latest
-
+    name: Build and push images to ECR with static analysis
     env:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-      AWS_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
-
+      AWS_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
     strategy:
       matrix:
-        service: [ vote, result, seed-data, worker ]
+        include:
+          - service: vote
+            type: python
+          - service: result
+            type: node
+          - service: seed-data
+            type: python
+          - service: worker
+            type: csharp
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -27,6 +33,36 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Static analysis for ${{ matrix.service }}
+        working-directory: app/${{ matrix.service }}
+        run: |
+          if [ "${{ matrix.type }}" = "python" ]; then
+            # Para servicios Python
+            echo "Running Python static analysis..."
+            python3 -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install -r requirements-dev.txt
+            flake8 .
+
+          elif [ "${{ matrix.type }}" = "node" ]; then
+            # Para servicios Node.js
+            echo "Running Node.js static analysis..."
+            npm ci
+            npm install eslint
+            npx eslint .
+
+          elif [ "${{ matrix.type }}" = "csharp" ]; then
+            # Para el servicio C# (worker)
+            echo "Running C# static analysis..."
+            dotnet restore
+            dotnet build --no-restore --configuration Release
+            dotnet format --verify-no-changes
+
+          else
+            echo "Unknown service type: ${{ matrix.type }}"
+            exit 1
+          fi
 
       - name: Login to ECR
         run: |
