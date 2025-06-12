@@ -48,7 +48,7 @@ jobs:
           elif [ "${{ matrix.type }}" = "node" ]; then
             # Para servicios Node.js
             echo "Running Node.js static analysis..."
-            npm ci
+            npm install
             npm install eslint
             npx eslint .
 
