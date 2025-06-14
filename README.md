@@ -310,20 +310,31 @@ Se proporciona un `docker-compose.yml` en `app/` con las siguientes característ
 - Perfiles para seed-data
 
 ```bash
-# Levantar servicios principales
+# Configurar variables de entorno
 cd app/
+cp .env.example .env    # Copiar plantilla de variables de entorno
+
+# Levantar servicios principales
 docker compose up --build -d
 
 # Ver logs de servicios
 docker compose logs -f vote result worker
 
-# Ejecutar seed-data
+# Ejecutar seed-data (opcional)
 docker compose --profile seed up --build -d seed
 
 # Detener y limpiar
 docker compose down --volumes
 ```
 
+> **Nota**: El archivo `.env` contiene las variables de entorno necesarias para los servicios:
+> - Credenciales de PostgreSQL
+> - Configuración de Redis
+> - Puertos de servicios
+
 ## Pruebas locales con Docker Compose
 
-Para levantar y probar todo el stack usar la guía en [docs/docker-compose.md](docs/docker-compose.md).
+Seguir los pasos anteriores en la sección "Levantar el stack local" para probar la aplicación. Los servicios estarán disponibles en:
+
+- Interfaz de votación: http://localhost:8080
+- Interfaz de resultados: http://localhost:8081
