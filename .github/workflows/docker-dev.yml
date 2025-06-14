@@ -34,18 +34,18 @@ jobs:
         run: |
           if [ "${{ matrix.type }}" = "python" ]; then
             pip install --user -r requirements-dev.txt
-            flake8 . --format=json --output-file flake8-report.json || true
+            flake8 . --format=json --output-file flake8-report.txt || true
 
           elif [ "${{ matrix.type }}" = "node" ]; then
             npm install
             npm install eslint
-            npx eslint . --format json --output-file eslint-report.json || true
+            npx eslint . --format json --output-file eslint-report.txt || true
 
           else
             dotnet tool install --global dotnet-format --version 5.1.225506 || true
             export PATH="$PATH:$HOME/.dotnet/tools"
             dotnet restore
-            dotnet format --verify-no-changes --report dotnet-report.sarif || true
+            dotnet format --verify-no-changes --report dotnet-report.txt || true
           fi
 
       - name: Upload Python report
@@ -53,21 +53,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: flake8-${{ matrix.service }}
-          path: ${{ matrix.path }}/flake8-report.json
+          path: ${{ matrix.path }}/flake8-report.txt
 
       - name: Upload Node report
         if: matrix.type == 'node'
         uses: actions/upload-artifact@v4
         with:
           name: eslint-${{ matrix.service }}
-          path: ${{ matrix.path }}/eslint-report.json
+          path: ${{ matrix.path }}/eslint-report.txt
 
       - name: Upload C# report
         if: matrix.type == 'csharp'
         uses: actions/upload-artifact@v4
         with:
           name: dotnet-${{ matrix.service }}
-          path: ${{ matrix.path }}/dotnet-report.sarif
+          path: ${{ matrix.path }}/dotnet-report.txt
   docker:
     needs: [static-analysis]
     name: Build and push images to ECR
