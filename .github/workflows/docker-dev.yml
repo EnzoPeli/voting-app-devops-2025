@@ -34,18 +34,18 @@ jobs:
         run: |
           if [ "${{ matrix.type }}" = "python" ]; then
             pip install --user -r requirements-dev.txt
-            flake8 . --format=json --output-file flake8-report.txt || true
+            flake8 . --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s' --output-file flake8-report.txt || true
 
           elif [ "${{ matrix.type }}" = "node" ]; then
             npm install
-            npm install eslint
-            npx eslint . --format json --output-file eslint-report.txt || true
+            npm install eslint@8.56.0
+            npx eslint . --format unix --output-file eslint-report.txt || true
 
           else
-            dotnet tool install --global dotnet-format --version 5.1.225506 || true
+            dotnet tool install --global dotnet-format || true
             export PATH="$PATH:$HOME/.dotnet/tools"
             dotnet restore
-            dotnet format --verify-no-changes --report dotnet-report.txt || true
+            dotnet format . --verify-no-changes --report dotnet-report.txt || true
           fi
 
       - name: Upload Python report
