@@ -10,6 +10,6 @@ page.onLoadFinished = function() {
 };
 
 page.open(url, function() {
-  page.evaluate(function() {
+    page.evaluate(function() {
   });
 });
