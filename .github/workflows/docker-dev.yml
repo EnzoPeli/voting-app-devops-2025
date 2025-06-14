@@ -1,11 +1,75 @@
-name: Docker Build & Push (Dev)
+name: CI – Static Analysis & Docker Build (Dev)
 
 on:
   push:
-    branches: [ develop ]
+    branches: [develop]
 
 jobs:
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - service: vote
+            path: app/vote
+            type: python
+          - service: result
+            path: app/result
+            type: node
+          - service: seed-data
+            path: app/seed-data
+            type: python
+          - service: worker
+            path: app/worker
+            type: csharp
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Run static analysis for ${{ matrix.service }}
+        working-directory: ${{ matrix.path }}
+        run: |
+          if [ "${{ matrix.type }}" = "python" ]; then
+            pip install --user -r requirements-dev.txt
+            flake8 . --format=json --output-file flake8-report.json || true
+
+          elif [ "${{ matrix.type }}" = "node" ]; then
+            npm install
+            npm install eslint
+            npx eslint . --format json --output-file eslint-report.json || true
+
+          else
+            dotnet tool install --global dotnet-format --version 5.1.225506 || true
+            export PATH="$PATH:$HOME/.dotnet/tools"
+            dotnet restore
+            dotnet format --verify-no-changes --report dotnet-report.sarif || true
+          fi
+
+      - name: Upload Python report
+        if: matrix.type == 'python'
+        uses: actions/upload-artifact@v3
+        with:
+          name: flake8-${{ matrix.service }}
+          path: ${{ matrix.path }}/flake8-report.json
+
+      - name: Upload Node report
+        if: matrix.type == 'node'
+        uses: actions/upload-artifact@v3
+        with:
+          name: eslint-${{ matrix.service }}
+          path: ${{ matrix.path }}/eslint-report.json
+
+      - name: Upload C# report
+        if: matrix.type == 'csharp'
+        uses: actions/upload-artifact@v3
+        with:
+          name: dotnet-${{ matrix.service }}
+          path: ${{ matrix.path }}/dotnet-report.sarif
   docker:
+    needs: [static-analysis]
     name: Build and push images to ECR
     runs-on: ubuntu-latest
 
