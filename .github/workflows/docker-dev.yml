@@ -50,21 +50,21 @@ jobs:
 
       - name: Upload Python report
         if: matrix.type == 'python'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: flake8-${{ matrix.service }}
           path: ${{ matrix.path }}/flake8-report.json
 
       - name: Upload Node report
         if: matrix.type == 'node'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: eslint-${{ matrix.service }}
           path: ${{ matrix.path }}/eslint-report.json
 
       - name: Upload C# report
         if: matrix.type == 'csharp'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: dotnet-${{ matrix.service }}
           path: ${{ matrix.path }}/dotnet-report.sarif
