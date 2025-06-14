@@ -19,10 +19,5 @@
     "semi": ["error", "always"],
     "no-console": "warn",
     "no-unused-vars": "warn"
-  },
-  "ignorePatterns": [
-    "node_modules/**",
-    "views/*.min.js",
-    "**/*.min.js"
-  ]
+  }
 }
