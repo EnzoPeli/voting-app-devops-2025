@@ -1,5 +1,33 @@
 # DevOps Voting-app 2025
 
+## Contenidos
+
+1. [Visión General](#visión-general)  
+2. [Estructura del Repositorio](#estructura-del-repositorio)  
+3. [Kanban & Flujo de Trabajo](#kanban--flujo-de-trabajo)  
+4. [Infraestructura como Código (IaC)](#infraestructura-como-código-iac)  
+5. [CI/CD](#cicd)  
+6. [Containerización & Docker Compose](#containerización--docker-compose)  
+7. [Serverless](#serverless)  
+8. [Observabilidad](#observabilidad)  
+9. [Próximos Pasos](#próximos-pasos)
+
+
+
+## Visión General
+
+> Este proyecto busca aplicar DevOps, para asegurar despliegues fiables en tres ambientes (Dev, Test y Prod). 
+> Abarca:
+> - Infraestructura como Código con Terraform  
+> - Pipelines de CI/CD en GitHub Actions  
+> - Containerización de microservicios y orquestación  
+> - Pruebas de calidad y análisis estático  
+> - Servicios Serverless para automatizaciones  
+> - Observabilidad y alertas  
+> - Documentación y presentación de la solución 
+
+
+
 ## Estado inicial del tablero Kanban
 
 ![Estado inicial del Kanban](docs/initial-kanban.png)
