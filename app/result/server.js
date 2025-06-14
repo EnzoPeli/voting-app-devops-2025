@@ -1,41 +1,41 @@
-const express = require('express');
-const async = require('async');
-const { Pool } = require('pg');
-const cookieParser = require('cookie-parser');
-const path = require('path');
-const app = express();
-const server = require('http').Server(app);
-const io = require('socket.io')(server);
+var express = require('express'),
+    async = require('async'),
+    { Pool } = require('pg'),
+    cookieParser = require('cookie-parser'),
+    app = express(),
+    server = require('http').Server(app),
+    io = require('socket.io')(server);
 
-const port = process.env.PORT || 4000;
+var port = process.env.PORT || 4000;
 
-io.on('connection', (socket) => {
-  socket.emit('message', { text: 'Welcome!' });
+io.on('connection', function (socket) {
 
-  socket.on('subscribe', (data) => {
+  socket.emit('message', { text : 'Welcome!' });
+
+  socket.on('subscribe', function (data) {
     socket.join(data.channel);
   });
 });
 
-const pool = new Pool({
+var pool = new Pool({
   connectionString: 'postgres://postgres:postgres@db/postgres'
 });
 
 async.retry(
   {times: 1000, interval: 1000},
   function(callback) {
-    pool.connect(function(err, client) {
+    pool.connect(function(err, client, done) {
       if (err) {
-        console.error('Waiting for db');
+        console.error("Waiting for db");
       }
       callback(err, client);
     });
   },
   function(err, client) {
     if (err) {
-      return console.error('Giving up');
+      return console.error("Giving up");
     }
-    console.log('Connected to db');
+    console.log("Connected to db");
     getVotes(client);
   }
 );
@@ -43,13 +43,13 @@ async.retry(
 function getVotes(client) {
   client.query('SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote', [], function(err, result) {
     if (err) {
-      console.error('Error performing query: ' + err);
+      console.error("Error performing query: " + err);
     } else {
       var votes = collectVotesFromResult(result);
-      io.sockets.emit('scores', JSON.stringify(votes));
+      io.sockets.emit("scores", JSON.stringify(votes));
     }
 
-    setTimeout(function() {getVotes(client); }, 1000);
+    setTimeout(function() {getVotes(client) }, 1000);
   });
 }
 
