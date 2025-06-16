@@ -1,0 +1,76 @@
+name: Docker Test (Integration)
+
+on:
+  push:
+    branches:
+      - test
+    tags:
+      - 'release/*'
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # 1. Checkout the code
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 2. Install Newman for Postman CLI tests
+      - name: Set up Node.js & Install Newman
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - run: npm install -g newman
+
+      # 3. Prepare env and start Docker Compose
+      - name: Prepare and start services
+        run: |
+          cd app
+          cp .env.example .env
+          chmod +x healthchecks/*.sh
+          docker compose up -d --build
+
+      # 4. Wait for Docker healthchecks
+      - name: Wait for services to be healthy
+        run: |
+          cd app
+          for i in {1..30}; do
+            if docker compose ps | grep -q unhealthy; then
+              echo "Waiting for healthy services... (attempt $i/30)"
+              sleep 5
+            else
+              echo "All services are healthy"
+              break
+            fi
+          done
+
+      # 5. Run Postman tests with Newman
+      - name: Run Postman integration tests
+        working-directory: .
+        run: |
+          newman run tests/Voting-app-Integration-Tests.postman_collection.json \
+            --environment tests/Local.postman_environment.json \
+            --reporters cli,json \
+            --reporter-json-export newman-results.json
+
+      # 6. Upload test results and Docker logs
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-test-results
+          path: newman-results.json
+
+      - name: Teardown services and upload logs
+        if: always()
+        run: |
+          cd app
+          docker compose logs > docker-compose.log
+          docker compose down --volumes
+      - name: Upload Docker Compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-compose-logs
+          path: app/docker-compose.log
