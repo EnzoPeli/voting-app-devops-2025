@@ -223,50 +223,23 @@ terraform apply -auto-approve -var-file=dev.tfvars
 
 ## CI/CD
 
-La integración y entrega continua se implementa con GitHub Actions. Los workflows actuales son:
+La integración y entrega continua se implementa con GitHub Actions. Los workflows principales son:
 
-### 1. Infraestructura (Terraform)
+1. **Infraestructura** (`.github/workflows/terraform-dev.yml`)
+   - Gestiona infraestructura AWS con Terraform
+   - Crea repositorios ECR y otros recursos
 
-- **Archivo**: `.github/workflows/terraform-dev.yml`
-- **Nombre**: "Terraform Plan & Apply (Dev)"
-- **Disparador**: push a la rama `develop`
-- **Jobs**:
-  1. `terraform`
-     - Configura credenciales AWS
-     - Setup Terraform
-     - `terraform init`
-     - `terraform plan -var-file=dev.tfvars`
-     - `terraform apply -auto-approve -var-file=dev.tfvars`
+2. **Análisis y Build** (`.github/workflows/docker-dev.yml`)
+   - Análisis estático de código
+   - Construcción y push de imágenes Docker
 
-### 2. Análisis Estático y Build de Contenedores
+3. **Pruebas** (`.github/workflows/docker-test.yml`)
+   - Pruebas de integración con Postman/Newman
+   - Validación de servicios y endpoints
 
-- **Archivo**: `.github/workflows/docker-dev.yml`
-- **Nombre**: "CI – Static Analysis & Docker Build (Dev)"
-- **Disparador**: push a la rama `develop`
-- **Jobs**:
-  1. `static-analysis` (matriz por servicio)
-     - Python (vote, seed-data): flake8
-     - Node.js (result): eslint
-     - C# (worker): dotnet format
-     - Genera reportes y sube artefactos
-  2. `docker`
-     - Depende de `static-analysis`
-     - Login en ECR
-     - Build y push de imágenes
-
-### (Pendiente) Workflows Futuros
-
-1. **Test**
-   - Pruebas de integración
-   - Validación de endpoints
-   - Pruebas de carga
-
-2. **Producción**
-   - Deploy a ECS/EKS
-   - Control de versiones
-   - Gates de calidad
-
----
+Documentación detallada:
+- [Workflows de CI/CD](docs/workflows.md) - Pipelines y configuración
+- [Repositorios ECR](docs/ecr.md) - Gestión de imágenes
 
 > **Variables / Secrets** necesarios:  
 > - `AWS_ACCESS_KEY_ID`  
