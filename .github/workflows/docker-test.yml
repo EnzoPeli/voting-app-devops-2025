@@ -29,15 +29,16 @@ jobs:
         run: |
           cd app
           cp .env.example .env
+          chmod +x healthchecks/*.sh
           docker compose up -d --build
 
       # 4. Wait for Docker healthchecks
       - name: Wait for services to be healthy
         run: |
           cd app
-          for i in {1..12}; do
+          for i in {1..30}; do
             if docker compose ps | grep -q unhealthy; then
-              echo "Waiting for healthy services..."
+              echo "Waiting for healthy services... (attempt $i/30)"
               sleep 5
             else
               echo "All services are healthy"
