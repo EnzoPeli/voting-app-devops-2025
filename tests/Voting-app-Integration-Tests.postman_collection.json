@@ -1,0 +1,138 @@
+{
+    "info": {
+        "_postman_id": "b0053b20-3ac1-4826-a245-5d3819a0bae0",
+        "name": "Voting-app Integration Tests",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "24963002"
+    },
+    "item": [
+        {
+            "name": "Health Checks",
+            "item": [
+                {
+                    "name": "Health Vote",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Vote service is healthy', function() {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://{{HOST}}:8080/",
+                            "protocol": "http",
+                            "host": ["{{HOST}}"],
+                            "port": "8080",
+                            "path": ["/"]
+                        }
+                    }
+                },
+                {
+                    "name": "Health Result",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Result service is healthy', function() {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://{{HOST}}:8081/",
+                            "protocol": "http",
+                            "host": ["{{HOST}}"],
+                            "port": "8081",
+                            "path": ["/"]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Voting Flow",
+            "item": [
+                {
+                    "name": "Cast Vote - Option A",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Vote was registered successfully', function() {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+                        "url": {
+                            "raw": "http://{{HOST}}:8080/",
+                            "protocol": "http",
+                            "host": ["{{HOST}}"],
+                            "port": "8080",
+                            "path": ["/"]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "vote=a",
+                            "options": {
+                                "raw": {
+                                    "language": "text"
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Cast Vote - Option B",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "pm.test('Vote was registered successfully', function() {",
+                                    "    pm.response.to.have.status(200);",
+                                    "});"]
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+                        "url": {
+                            "raw": "http://{{HOST}}:8080/",
+                            "protocol": "http",
+                            "host": ["{{HOST}}"],
+                            "port": "8080",
+                            "path": ["/"]
+                        },
+                        "body": {
+                            "mode": "raw",
+                            "raw": "vote=b",
+                            "options": {
+                                "raw": {
+                                    "language": "text"
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}
