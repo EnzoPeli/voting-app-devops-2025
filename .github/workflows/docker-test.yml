@@ -48,8 +48,8 @@ jobs:
 
       # 5. Run Postman tests with Newman
       - name: Run Postman integration tests
+        working-directory: .
         run: |
-          cd ..
           newman run tests/Voting-app-Integration-Tests.postman_collection.json \
             --environment tests/Local.postman_environment.json \
             --reporters cli,json \
