@@ -49,8 +49,9 @@ jobs:
       # 5. Run Postman tests with Newman
       - name: Run Postman integration tests
         run: |
-          newman run ../tests/Voting-app-Integration-Tests.postman_collection.json \
-            --environment ../tests/Local.postman_environment.json \
+          cd ..
+          newman run tests/Voting-app-Integration-Tests.postman_collection.json \
+            --environment tests/Local.postman_environment.json \
             --reporters cli,json \
             --reporter-json-export newman-results.json
 
