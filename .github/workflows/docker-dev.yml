@@ -93,10 +93,7 @@ jobs:
           aws-region:            ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Login to ECR
-        run: |
-          aws ecr get-login-password --region $AWS_REGION \
-            | docker login --username AWS --password-stdin \
-              $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push ${{ matrix.service }} service
         run: |

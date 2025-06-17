@@ -49,7 +49,7 @@ Para gestionar los tres entornos (Dev, Test y Prod) usamos un flujo de ramas:
 - **Ramas principales**  
   - `develop`: integraciones y despliegue automático a Dev.  
   - `test`: despliegue a Test tras aprobar quality gates.  
-  - `main`: despliegue a Prod, con tagging semántico (`vX.Y.Z`).
+  - `main`: despliegue a Prod, con tagging semántico (`vX.Y.Z`) opcional.
 
 - **Feature branches**  
   - Se crean desde `develop`:  
@@ -223,23 +223,62 @@ terraform apply -auto-approve -var-file=dev.tfvars
 
 ## CI/CD
 
-La integración y entrega continua se implementa con GitHub Actions. Los workflows principales son:
+La integración y entrega continua se implementa con GitHub Actions. Los workflows actuales son:
 
-1. **Infraestructura** (`.github/workflows/terraform-dev.yml`)
-   - Gestiona infraestructura AWS con Terraform
-   - Crea repositorios ECR y otros recursos
+### 1. Infraestructura (Terraform)
 
-2. **Análisis y Build** (`.github/workflows/docker-dev.yml`)
-   - Análisis estático de código
-   - Construcción y push de imágenes Docker
+- **Archivo**: `.github/workflows/terraform-dev.yml`
+- **Nombre**: "Terraform Plan & Apply (Dev)"
+- **Disparador**: push a la rama `develop`
+- **Jobs**:
+  1. `terraform`
+     - Configura credenciales AWS
+     - Setup Terraform
+     - `terraform init`
+     - `terraform plan -var-file=dev.tfvars`
+     - `terraform apply -auto-approve -var-file=dev.tfvars`
 
-3. **Pruebas** (`.github/workflows/docker-test.yml`)
-   - Pruebas de integración con Postman/Newman
-   - Validación de servicios y endpoints
+### 2. Análisis Estático y Build de Contenedores
 
-Documentación detallada:
-- [Workflows de CI/CD](docs/workflows.md) - Pipelines y configuración
-- [Repositorios ECR](docs/ecr.md) - Gestión de imágenes
+- **Archivo**: `.github/workflows/docker-dev.yml`
+- **Nombre**: "CI – Static Analysis & Docker Build (Dev)"
+- **Disparador**: push a la rama `develop`
+- **Jobs**:
+  1. `static-analysis` (matriz por servicio)
+     - Python (vote, seed-data): flake8
+     - Node.js (result): eslint
+     - C# (worker): dotnet format
+     - Genera reportes y sube artefactos
+     - Se utiliza como quality gate
+  2. `docker`
+     - Depende de `static-analysis`
+     - Login en ECR
+     - Build y push de imágenes
+
+### 3. Pruebas de Integración
+
+- **Archivo**: `.github/workflows/docker-test.yml`
+- **Nombre**: "CI – Integration Tests"
+- **Disparador**: pull requests a `develop` y `main`
+- **Jobs**:
+  1. `integration-tests`
+     - Levanta servicios con Docker Compose
+     - Ejecuta pruebas con Postman/Newman
+     - Valida endpoints y flujo de votación
+
+### 4. Deploy a Producción
+
+- **Archivo**: `.github/workflows/docker-prod.yml`
+- **Nombre**: "Docker Prod (Build & Deploy)"
+- **Disparador**: push a `main` o tags `v*.*.*`
+- **Jobs**:
+  1. `build`
+     - Build y push de imágenes con tag `:prod`
+  2. `deploy`
+     - Deploy de infraestructura con Terraform
+     - Variables específicas para producción
+
+---
 
 > **Variables / Secrets** necesarios:  
 > - `AWS_ACCESS_KEY_ID`  

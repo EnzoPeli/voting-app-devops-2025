@@ -1,226 +1,146 @@
 # Workflows de CI/CD
 
-Este documento describe los workflows de GitHub Actions utilizados en el proyecto.
+Este documento describe los workflows de GitHub Actions para CI/CD del proyecto voting-app.
 
-## Pipeline de Pruebas (`docker-test.yml`)
+## Pipeline de Desarrollo (`terraform-dev.yml`)
 
-Este workflow se encarga de ejecutar las pruebas de integración usando Postman/Newman.
+Este workflow gestiona la infraestructura AWS con Terraform.
 
-### Flujo del Pipeline
+### Características
 
-1. **Checkout del código**
-   - Usa `actions/checkout@v4`
+1. **Credenciales AWS**
+   - Usa credenciales temporales del lab
+   - Configura región por defecto
 
-2. **Preparación de Newman**
-   - Instala Node.js 18
-   - Instala Newman globalmente (`npm install -g newman`)
+2. **Recursos Gestionados**
+   - Repositorios ECR para cada servicio
+   - Networking (VPC, subnets, etc.)
+   - Backend S3 para estado
 
-3. **Preparación y arranque de servicios**
-   ```yaml
-   - name: Prepare and start services
-     run: |
-       cd app
-       cp .env.example .env
-       chmod +x healthchecks/*.sh  # Dar permisos a scripts de healthcheck
-       docker compose up -d --build
-   ```
+### Terraform Init & Apply
 
-4. **Espera de healthchecks**
-   - Espera hasta 2.5 minutos (30 intentos × 5 segundos)
-   - Verifica que todos los servicios estén healthy
-   ```yaml
-   for i in {1..30}; do
-     if docker compose ps | grep -q unhealthy; then
-       echo "Waiting for healthy services... (attempt $i/30)"
-       sleep 5
-     else
-       echo "All services are healthy"
-       break
-     fi
-   done
-   ```
+```yaml
+steps:
+  - name: Setup Terraform
+    run: |
+      terraform init \
+        -backend-config="bucket=voting-app-terraform-state" \
+        -backend-config="key=voting-app/dev.tfstate"
 
-5. **Ejecución de pruebas Postman**
-   ```yaml
-   - name: Run Postman integration tests
-     working-directory: .  # Ejecutar desde raíz del proyecto
-     run: |
-       newman run tests/Voting-app-Integration-Tests.postman_collection.json \
-         --environment tests/Local.postman_environment.json \
-         --reporters cli,json \
-         --reporter-json-export newman-results.json
-   ```
+  - name: Terraform Plan & Apply
+    run: |
+      terraform plan -var-file=dev.tfvars
+      terraform apply -auto-approve -var-file=dev.tfvars
+```
 
-6. **Recolección de resultados**
-   - Guarda resultados de Newman como artefacto
-   - Guarda logs de Docker Compose
-   - Limpia recursos (docker compose down)
+## Pipeline de Test (`docker-test.yml`)
 
-## Pipeline de Infraestructura (`terraform-dev.yml`)
+Este workflow ejecuta pruebas de integración con Postman/Newman.
 
-Este workflow gestiona la infraestructura AWS usando Terraform. Se ejecuta automáticamente cuando hay cambios en la rama `develop`.
+### Características
 
-### Flujo del Pipeline
+1. **Servicios Docker**
+   - Levanta todos los servicios con `docker compose`
+   - Espera a que estén healthy
 
-1. **Checkout del código**
-   - Usa `actions/checkout@v4` para clonar el repositorio
-   - Obtiene la última versión de la rama `develop`
+2. **Pruebas de Integración**
+   - Usa colección Postman
+   - Ejecuta con Newman
+   - Valida endpoints y flujos
 
-2. **Configuración de AWS**
-   ```yaml
-   - name: Configure AWS Credentials
-     uses: aws-actions/configure-aws-credentials@v1
-     with:
-       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-       aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-       aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-   ```
-   - Configura credenciales de AWS usando secretos del repositorio
-   - Permite a Terraform interactuar con servicios AWS (ECR, S3, etc.)
+### Ejecución de Tests
 
-3. **Configuración de Terraform**
-   ```yaml
-   - name: Set up Terraform
-     uses: hashicorp/setup-terraform@v3
-     with:
-       terraform_wrapper: false
-   ```
-   - Instala la versión correcta de Terraform
-   - Deshabilita wrapper para mejor integración con GitHub Actions
-
-4. **Inicialización y Plan**
-   ```yaml
-   - name: Initialize Terraform
-     working-directory: infra
-     run: terraform init
-
-   - name: Create Terraform Plan
-     working-directory: infra
-     run: terraform plan -out=tfplan
-   ```
-   - Inicializa backend S3 para estado remoto
-   - Genera plan detallando cambios a realizar
-   - Guarda plan como artefacto para revisión
-
-5. **Aplicación de Cambios**
-   ```yaml
-   - name: Apply Terraform Plan
-     working-directory: infra
-     run: terraform apply -auto-approve tfplan
-   ```
-   - Aplica el plan sin intervención manual (`-auto-approve`)
-   - Crea/actualiza recursos en AWS:
-     - Repositorios ECR para cada servicio
-     - Configuración de escaneo y tags
-     - Otros recursos de infraestructura
-
-### Infraestructura Gestionada
-
-1. **Repositorios ECR**
-   - `voting-app-vote`: Frontend de votación
-   - `voting-app-result`: Frontend de resultados
-   - `voting-app-worker`: Procesador de votos
-   - `voting-app-seed-data`: Generador de datos de prueba
-
-2. **Estado Remoto**
-   - Bucket S3: `voting-app-terraform-state-177816`
-   - Tabla DynamoDB: `terraform-locks`
-   - Región: `us-east-1`
-
-3. **Recursos de Red**
-   - VPC y subnets para servicios
-   - Grupos de seguridad
-   - Otras configuraciones de red
+```yaml
+steps:
+  - name: Run integration tests
+    run: |
+      newman run tests/Voting-app-Integration-Tests.postman_collection.json \
+        --environment tests/Local.postman_environment.json
+```
 
 ## Pipeline de Desarrollo (`docker-dev.yml`)
 
-Este workflow realiza análisis estático y construcción de imágenes Docker para cada servicio. Se ejecuta automáticamente en push a `develop`.
+Este workflow realiza análisis estático y build de imágenes.
 
-### Análisis Estático
+### Características
 
-Se ejecuta en paralelo para cada servicio usando una matriz de configuración:
+1. **Análisis Estático**
+   - Python: flake8
+   - Node.js: eslint
+   - C#: dotnet format
+
+2. **Build & Push**
+   - Construye imágenes Docker
+   - Push a ECR con tag `:latest`
+
+### Build y Push
 
 ```yaml
-strategy:
-  matrix:
-    include:
-      - service: vote
-        path: app/vote
-        type: python
-      - service: result
-        path: app/result
-        type: node
-      - service: seed-data
-        path: app/seed-data
-        type: python
-      - service: worker
-        path: app/worker
-        type: csharp
+steps:
+  - name: Build & push image
+    run: |
+      docker build -t $ECR/voting-app-service:latest .
+      docker push $ECR/voting-app-service:latest
 ```
 
-#### Análisis por Lenguaje
+## Pipeline de Producción (`docker-prod.yml`)
 
-1. **Python (vote, seed-data)**
-   ```yaml
-   pip install --user -r requirements-dev.txt
-   flake8 . --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s' \
-     --output-file flake8-report.txt
-   ```
-   - Usa Flake8 para análisis de código
-   - Genera reporte detallado con ubicación de errores
+Este workflow gestiona el build y deploy a producción. Se ejecuta automáticamente en push a `main` o cuando se crean tags con formato `v*.*.*`.
 
-2. **Node.js (result)**
-   ```yaml
-   npm install
-   npm install eslint@8.56.0
-   npx eslint . --format unix --output-file eslint-report.txt
-   ```
-   - Usa ESLint para análisis de código
-   - Verifica estándares de JavaScript/Node.js
+### Build y Push
 
-3. **C# (worker)**
-   ```yaml
-   dotnet tool install --global dotnet-format
-   dotnet restore
-   dotnet format . --verify-no-changes --report dotnet-report.txt
-   ```
-   - Usa dotnet-format para verificar estilo
-   - Comprueba formato y convenciones de C#
+```yaml
+env:
+  TF_VAR_file: infra/prod.tfvars
 
-### Construcción de Imágenes
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-1. **Login a ECR**
-   ```yaml
-   - name: Configure AWS credentials
-     uses: aws-actions/configure-aws-credentials@v1
-   - name: Login to Amazon ECR
-     uses: aws-actions/amazon-ecr-login@v1
-   ```
-   - Configura credenciales AWS
-   - Autentica con Amazon ECR
+      - name: Build & push vote image
+        run: |
+          docker build -t $ECR/voting-app-vote:prod app/vote
+          docker push $ECR/voting-app-vote:prod
+```
 
-2. **Build y Push**
-   ```yaml
-   - name: Build and push ${{ matrix.service }}
-     working-directory: ${{ matrix.path }}
-     run: |
-       docker build -t $ECR_REGISTRY/${{ matrix.service }}:${{ github.sha }} .
-       docker push $ECR_REGISTRY/${{ matrix.service }}:${{ github.sha }}
-   ```
-   - Construye imagen Docker para cada servicio
-   - Tagea con SHA del commit
-   - Sube a repositorio ECR
+### Deploy a Producción
 
-### Artefactos y Reportes
+```yaml
+deploy:
+  needs: build
+  environment: production
+  steps:
+    - name: Setup Terraform
+      run: |
+        terraform init -backend-config="key=voting-app/prod.tfstate"
+        terraform plan -var-file=prod.tfvars
+        terraform apply -auto-approve -var-file=prod.tfvars
+```
 
-- Guarda reportes de análisis estático como artefactos
-- Permite revisar problemas de código detectados
-- Mantiene historial de builds y análisis
+### Protección del Ambiente de Producción
+
+Para garantizar deploys seguros a producción:
+
+1. Ve a **Settings → Environments** del repositorio
+2. Crea un nuevo Environment llamado `production`
+3. En **Deployment protection rules**:
+   - Habilita **Required reviewers**
+   - Selecciona los revisores autorizados
+
+Esto establece un quality gate:
+- El job `build` corre automáticamente en push a `main`
+- El job `deploy` requiere aprobación manual de un revisor
+- Queda registro de quién aprobó cada deploy
 
 ## Notas Importantes
 
 - Los scripts de healthcheck necesitan permisos de ejecución (`chmod +x`)
-- El tiempo de espera para servicios es configurable (actualmente 2.5 min)
-- Las pruebas de integración usan la colección Postman en `/tests`
-- El pipeline de Terraform se ejecuta automáticamente en push a `develop`
+- Los archivos de entorno deben estar presentes (`.env` o `.env.example`)
+- Las credenciales AWS deben configurarse como secretos en GitHub
