@@ -1,12 +1,11 @@
 name: Docker Prod (Build & Deploy)
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to deploy (e.g., v1.2.3)'
-        required: true
-        type: string
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
 
 jobs:
   # Job 1: Build & Push imágenes con tag :prod
@@ -24,7 +23,7 @@ jobs:
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build & push vote image
         run: |

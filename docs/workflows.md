@@ -85,7 +85,7 @@ steps:
 
 ## Pipeline de Producción (`docker-prod.yml`)
 
-Este workflow gestiona el build y deploy a producción. Se ejecuta manualmente vía `workflow_dispatch` desde la interfaz de GitHub Actions.
+Este workflow gestiona el build y deploy a producción. Se ejecuta automáticamente en push a `main` o cuando se crean tags con formato `v*.*.*`.
 
 ### Build y Push
 

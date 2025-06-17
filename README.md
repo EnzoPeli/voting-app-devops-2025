@@ -49,7 +49,7 @@ Para gestionar los tres entornos (Dev, Test y Prod) usamos un flujo de ramas:
 - **Ramas principales**  
   - `develop`: integraciones y despliegue automático a Dev.  
   - `test`: despliegue a Test tras aprobar quality gates.  
-  - `main`: despliegue a Prod, con tagging semántico (`vX.Y.Z`).
+  - `main`: despliegue a Prod, con tagging semántico (`vX.Y.Z`) opcional.
 
 - **Feature branches**  
   - Se crean desde `develop`:  
@@ -249,6 +249,7 @@ La integración y entrega continua se implementa con GitHub Actions. Los workflo
      - Node.js (result): eslint
      - C# (worker): dotnet format
      - Genera reportes y sube artefactos
+     - Se utiliza como quality gate
   2. `docker`
      - Depende de `static-analysis`
      - Login en ECR
@@ -269,8 +270,7 @@ La integración y entrega continua se implementa con GitHub Actions. Los workflo
 
 - **Archivo**: `.github/workflows/docker-prod.yml`
 - **Nombre**: "Docker Prod (Build & Deploy)"
-- **Control de Acceso**: manual vía `workflow_dispatch`
-  - Input `version`: Versión a desplegar (ej: v1.2.3)
+- **Disparador**: push a `main` o tags `v*.*.*`
 - **Jobs**:
   1. `build`
      - Build y push de imágenes con tag `:prod`
