@@ -13,6 +13,11 @@ terraform {
   }
 }
 
+data "aws_iam_role" "lab_role" {
+  name = "LabRole"
+}
+
+
 provider "aws" {
   region  = var.aws_region
 }
@@ -64,3 +69,36 @@ module "security_group" {
   tags = var.tags
 }
 
+# Modulo EKS Cluster
+module "eks_cluster" {
+  source              = "./modules/eks_cluster"
+  cluster_name        = "voting-cluster"
+  node_group_name     = "voting-node-group"
+  subnet_ids          = module.network.public_subnet_ids
+  cluster_role_arn    = data.aws_iam_role.lab_role.arn
+  node_role_arn       = data.aws_iam_role.lab_role.arn
+  ec2_ssh_key_name    = "voting-key" # o el nombre que uses
+  instance_types      = ["t3.small"]
+  desired_capacity    = 2
+  min_capacity        = 1
+  max_capacity        = 3
+  tags                = var.tags
+}
+
+
+resource "tls_private_key" "ssh_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "voting_key" {
+  key_name   = "voting-key"
+  public_key = tls_private_key.ssh_key.public_key_openssh
+}
+
+resource "local_file" "private_key" {
+  content              = tls_private_key.ssh_key.private_key_pem
+  filename             = "${path.module}/voting-key.pem"
+  file_permission      = "0600"
+  directory_permission = "0700"
+}

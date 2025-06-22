@@ -8,6 +8,12 @@ public_subnets_cidrs = [
   "10.0.2.0/24"
 ]
 
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b",
+  "us-east-1c"
+]
+
 tags = {
   Environment = "dev"
   Project     = "voting-app"
