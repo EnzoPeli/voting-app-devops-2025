@@ -40,7 +40,7 @@ jobs:
           docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker:prod app/worker
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker:prod
 
-  # Job 2: Deploy infra & services a Prod (requiere aprobación)
+  # Job 2: Deploy infra & services a Prod
   deploy:
     needs: build
     runs-on: ubuntu-latest
