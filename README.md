@@ -299,73 +299,47 @@ terraform apply -auto-approve -var-file=dev.tfvars
 
 ## CI/CD
 
-La integración y entrega continua se implementa con GitHub Actions. Los workflows actuales son:
+La aplicación utiliza GitHub Actions para automatizar el proceso de CI/CD, con flujos de trabajo específicos para cada ambiente.
 
-### 1. Infraestructura (Terraform)
+### Pipelines de CI/CD
 
-#### Despliegue a Dev
+El proyecto implementa una estrategia de CI/CD con pipelines unificados por ambiente:
 
-El workflow se encarga de desplegar la infraestructura en el entorno Dev.
+#### Flujo de Despliegue Automatizado
 
+El proceso de CI/CD está configurado para desplegar automáticamente en el entorno correspondiente:
 
-- **Archivo**: `.github/workflows/terraform-dev.yml`
-- **Nombre**: "Terraform Plan & Apply (Dev)"
-- **Disparador**: push a la rama `develop`
-- **Jobs**:
-  1. `terraform`
-     - Configura credenciales AWS
-     - Setup Terraform
-     - `terraform init`
-     - `terraform plan -var-file=dev.tfvars`
-     - `terraform apply -auto-approve -var-file=dev.tfvars`
+1. **Workflow [ci-dev.yml]**:
+   - Se ejecuta al hacer push a la rama `develop`
+   - Realiza análisis estático de código
+   - Aplica la infraestructura con Terraform usando `dev.tfvars`
+   - Construye y publica las imágenes Docker con tag `:dev`
+   - Despliega la aplicación en el namespace `dev`
 
-### 2. Análisis Estático y Build de Contenedores
+2. **Workflow [ci-test.yml]**:
+   - Se ejecuta al hacer push a la rama `test`
+   - Ejecuta pruebas de integración
+   - Aplica la infraestructura con Terraform usando `test.tfvars`
+   - Construye y publica las imágenes Docker con tag `:test`
+   - Despliega la aplicación en el namespace `test`
 
-El workflow se encarga de realizar un análisis estático de los microservicios a partir de sus archivos de código fuente, utilizando como herramientas flake8, eslint y dotnet formats según el lenguaje de programación, posteriormente construir sus imágenes Docker y subirlos al repositorio ECR para su despliegue en el entorno Dev.
+3. **Workflow [ci-prod.yml]**:
+   - Se ejecuta al hacer push a la rama `main` o tags `v*.*.*`
+   - Aplica la infraestructura con Terraform usando `prod.tfvars`
+   - Construye y publica las imágenes Docker con tag `:prod`
+   - Despliega la aplicación en el namespace `prod`
+   - Utiliza protecciones adicionales del entorno `production`
 
-- **Archivo**: `.github/workflows/docker-dev.yml`
-- **Nombre**: "CI – Static Analysis & Docker Build (Dev)"
-- **Disparador**: push a la rama `develop`
-- **Jobs**:
-  1. `static-analysis` (matriz por servicio)
-     - Python (vote, seed-data): flake8
-     - Node.js (result): eslint
-     - C# (worker): dotnet format
-     - Genera reportes y sube artefactos
-     - Se utiliza como quality gate
-  2. `docker`
-     - Depende de `static-analysis`
-     - Login en ECR
-     - Build y push de imágenes
+Para más detalles sobre los workflows, consulta [docs/workflows.md](docs/workflows.md).
 
-### 3. Pruebas de Integración
+#### Ventajas de este Enfoque
 
-El workflow se encarga de levantar los servicios con Docker Compose y ejecutar pruebas con Postman/Newman para validar los endpoints y el flujo de votación. Con el objetivo de validar que los servicios funcionen correctamente y que el flujo de votación sea correcto.
-
-- **Archivo**: `.github/workflows/docker-test.yml`
-- **Nombre**: "CI – Integration Tests"
-- **Disparador**: pull requests a `develop` y `main`
-- **Jobs**:
-  1. `integration-tests`
-     - Levanta servicios con Docker Compose
-     - Ejecuta pruebas con Postman/Newman
-     - Valida endpoints y flujo de votación
-
-### 4. Deploy a Producción
-
-El workflow se encarga de desplegar la infraestructura en el entorno Prod. 
-Primero se ejecuta el workflow de build y push de imágenes con tag `:prod`, y luego se ejecuta el workflow de deploy de infraestructura con Terraform.
-
-- **Archivo**: `.github/workflows/docker-prod.yml`
-- **Nombre**: "Docker Prod (Build & Deploy)"
-- **Disparador**: push a `main` o tags `v*.*.*`
-- **Jobs**:
-  1. `build`
-     - Build y push de imágenes con tag `:prod`
-  2. `deploy`
-     - Deploy de infraestructura con Terraform
-     - Variables específicas para producción
-
+- **Aislamiento**: Cada entorno opera de forma independiente sin interferir con otros
+- **Consistencia**: Mismos manifiestos para todos los entornos, reduciendo duplicación
+- **Trazabilidad**: Clara separación entre versiones de desarrollo, test y producción
+- **Facilidad de gestión**: Comandos kubectl pueden filtrarse por namespace
+- **Seguridad**: Posibilidad de aplicar diferentes políticas de RBAC por entorno
+- **Secuencia garantizada**: Los jobs se ejecutan en un orden específico, asegurando dependencias correctas
 ---
 
 > **Variables / Secrets** necesarios:  
@@ -423,6 +397,7 @@ docker compose down --volumes
 ## Orquestación con Kubernetes (EKS)
 
 La aplicación está configurada para ser desplegada en un cluster de Kubernetes gestionado por AWS (EKS). Los manifiestos se encuentran en el directorio `k8s/`, organizados por componente.
+Se utiliza kubectl para desplegar la aplicación en el cluster EKS.
 
 ### Estructura de Manifiestos
 
@@ -544,28 +519,28 @@ NAMESPACE=prod ./scripts/apply-manifests.sh  # Para producción
 
 El proceso de CI/CD está configurado para desplegar automáticamente en el entorno correspondiente:
 
-
-<!-- Modificar esta parte para separar flujos de build y push de imágenes de los de terraform -->
 1. **Workflow `terraform-dev.yml`**:
    - Se ejecuta al hacer push a la rama `develop`
    - Aplica la infraestructura con Terraform usando `dev.tfvars`
    - Despliega la aplicación en el namespace `dev` con las imágenes etiquetadas como `dev`
 
-2. **Workflow `docker-prod.yml`**:
-   - Se ejecuta al hacer push a la rama `main`
-   - Construye y publica las imágenes con la etiqueta `prod`
-   - Despliega la aplicación en el namespace `prod`
-
-3. **Workflow `docker-test.yml`**:
+2. **Workflow `terraform-test.yml`**:
    - Se ejecuta al hacer push a la rama `test`
-   - Construye y publica las imágenes con la etiqueta `test`
-   - Despliega la aplicación en el namespace `test`
+   - Aplica la infraestructura con Terraform usando `test.tfvars`
+   - Despliega la aplicación en el namespace `test` con las imágenes etiquetadas como `test`
+
+3. **Workflow `terraform-prod.yml`**:
+   - Se ejecuta al hacer push a la rama `main`
+   - Aplica la infraestructura con Terraform usando `prod.tfvars`
+   - Despliega la aplicación en el namespace `prod` con las imágenes etiquetadas como `prod`
+
+
 
 #### Ventajas de este Enfoque
 
 - **Aislamiento**: Cada entorno opera de forma independiente sin interferir con otros
 - **Consistencia**: Mismos manifiestos para todos los entornos, reduciendo duplicación
-- **Trazabilidad**: Clara separación entre versiones de desarrollo y producción
+- **Trazabilidad**: Clara separación entre versiones de desarrollo, test y producción
 - **Facilidad de gestión**: Comandos kubectl pueden filtrarse por namespace
 - **Seguridad**: Posibilidad de aplicar diferentes políticas de RBAC por entorno
 

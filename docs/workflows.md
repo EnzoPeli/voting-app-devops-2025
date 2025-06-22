@@ -1,130 +1,125 @@
 # Workflows de CI/CD
 
-Este documento describe los workflows de GitHub Actions para CI/CD del proyecto voting-app.
+Este documento describe los workflows de GitHub Actions para CI/CD del proyecto voting-app. La estructura de workflows está diseñada para soportar múltiples ambientes (dev, test, prod) con pipelines unificados para cada ambiente.
 
-## Pipeline de Desarrollo (`terraform-dev.yml`)
+## Estructura de Workflows
 
-Este workflow gestiona la infraestructura AWS con Terraform.
+Los workflows están organizados por ambiente, con un pipeline completo para cada uno:
 
-### Características
+1. **Pipeline de Desarrollo**: [ci-dev.yml]
+   - Análisis estático de código
+   - Infraestructura con Terraform
+   - Construcción y publicación de imágenes Docker
+   - Despliegue en Kubernetes (namespace `dev`)
 
-1. **Credenciales AWS**
-   - Usa credenciales temporales del lab
-   - Configura región por defecto
+2. **Pipeline de Test**: [ci-test.yml]
+   - Pruebas de integración
+   - Infraestructura con Terraform
+   - Construcción y publicación de imágenes Docker
+   - Despliegue en Kubernetes (namespace `test`)
 
-2. **Recursos Gestionados**
-   - Repositorios ECR para cada servicio
-   - Networking (VPC, subnets, etc.)
-   - Backend S3 para estado
+3. **Pipeline de Producción**: [ci-prod.yml]
+   - Infraestructura con Terraform
+   - Construcción y publicación de imágenes Docker
+   - Despliegue en Kubernetes (namespace `prod`)
+   - Protección adicional con entorno `production`
 
-### Terraform Init & Apply
+## Pipelines por Ambiente
 
-```yaml
-steps:
-  - name: Setup Terraform
-    run: |
-      terraform init \
-        -backend-config="bucket=voting-app-terraform-state" \
-        -backend-config="key=voting-app/dev.tfstate"
+### 1. Pipeline de Desarrollo ([ci-dev.yml])
 
-  - name: Terraform Plan & Apply
-    run: |
-      terraform plan -var-file=dev.tfvars
-      terraform apply -auto-approve -var-file=dev.tfvars
-```
+Este workflow integra análisis estático, infraestructura y despliegue para el ambiente de desarrollo.
 
-## Pipeline de Test (`docker-test.yml`)
+**Disparador**: Push a la rama `develop`
 
-Este workflow ejecuta pruebas de integración con Postman/Newman.
+**Jobs**:
 
-### Características
+1. **static-analysis**: Análisis estático de código
+   - Python (vote, seed-data): flake8
+   - Node.js (result): eslint
+   - C# (worker): dotnet format
+   - Genera reportes y sube artefactos
 
-1. **Servicios Docker**
-   - Levanta todos los servicios con `docker compose`
-   - Espera a que estén healthy
+2. **terraform**: Gestión de infraestructura
+   - Configura credenciales AWS
+   - Setup Terraform
+   - Terraform init, plan y apply con `dev.tfvars`
 
-2. **Pruebas de Integración**
-   - Usa colección Postman
-   - Ejecuta con Newman
+3. **build**: Construcción y publicación de imágenes Docker
+   - Login en ECR
+   - Build y push de imágenes con tag `:dev`
+
+4. **kubernetes**: Despliegue en Kubernetes
+   - Configura kubectl para EKS
+   - Crea namespace `dev` si no existe
+   - Aplica manifiestos con `NAMESPACE=dev`
+   - Verifica readiness de pods
+
+### 2. Pipeline de Test ([ci-test.yml])
+
+Este workflow integra pruebas de integración, infraestructura y despliegue para el ambiente de test.
+
+**Disparador**: Push a la rama `test`
+
+**Jobs**:
+
+1. **integration-tests**: Pruebas de integración
+   - Levanta servicios con Docker Compose
+   - Ejecuta pruebas con Postman/Newman
    - Valida endpoints y flujos
 
-### Ejecución de Tests
+2. **terraform**: Gestión de infraestructura
+   - Configura credenciales AWS
+   - Setup Terraform
+   - Terraform init, plan y apply con [test.tfvars](infra/test.tfvars)
 
-```yaml
-steps:
-  - name: Run integration tests
-    run: |
-      newman run tests/Voting-app-Integration-Tests.postman_collection.json \
-        --environment tests/Local.postman_environment.json
-```
+3. **build**: Construcción y publicación de imágenes Docker
+   - Login en ECR
+   - Build y push de imágenes con tag `:test`
 
-## Pipeline de Desarrollo (`docker-dev.yml`)
+4. **kubernetes**: Despliegue en Kubernetes
+   - Configura kubectl para EKS
+   - Crea namespace `test` si no existe
+   - Aplica manifiestos con `NAMESPACE=test`
+   - Verifica readiness de pods
 
-Este workflow realiza análisis estático y build de imágenes.
+### 3. Pipeline de Producción ([ci-prod.yml])
 
-### Características
+Este workflow integra infraestructura y despliegue para el ambiente de producción con protecciones adicionales.
 
-1. **Análisis Estático**
-   - Python: flake8
-   - Node.js: eslint
-   - C#: dotnet format
+**Disparador**: Push a la rama `main` o tags con formato `v*.*.*`
 
-2. **Build & Push**
-   - Construye imágenes Docker
-   - Push a ECR con tag `:latest`
+**Jobs**:
 
-### Build y Push
+1. **terraform**: Gestión de infraestructura
+   - Configura credenciales AWS
+   - Setup Terraform
+   - Terraform init, plan y apply con [prod.tfvars](infra/prod.tfvars)
+   - Usa el entorno `production` para protección adicional
 
-```yaml
-steps:
-  - name: Build & push image
-    run: |
-      docker build -t $ECR/voting-app-service:latest .
-      docker push $ECR/voting-app-service:latest
-```
+2. **build**: Construcción y publicación de imágenes Docker
+   - Login en ECR
+   - Build y push de imágenes con tag `:prod`
+   - Usa el entorno `production` para protección adicional
 
-## Pipeline de Producción (`docker-prod.yml`)
+3. **kubernetes**: Despliegue en Kubernetes
+   - Configura kubectl para EKS
+   - Crea namespace `prod` si no existe
+   - Aplica manifiestos con `NAMESPACE=prod`
+   - Verifica readiness de pods
+   - Usa el entorno `production` para protección adicional
 
-Este workflow gestiona el build y deploy a producción. Se ejecuta automáticamente en push a `main` o cuando se crean tags con formato `v*.*.*`.
+## Estrategia de Namespaces en Kubernetes
 
-### Build y Push
+Los workflows utilizan namespaces de Kubernetes para aislar los ambientes:
 
-```yaml
-env:
-  TF_VAR_file: infra/prod.tfvars
+- Namespace `dev`: Ambiente de desarrollo
+- Namespace `test`: Ambiente de pruebas
+- Namespace `prod`: Ambiente de producción
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+Cada workflow se encarga de crear su respectivo namespace y desplegar los manifiestos en él, utilizando la variable de entorno `NAMESPACE` para parametrizar los despliegues.
 
-      - name: Build & push vote image
-        run: |
-          docker build -t $ECR/voting-app-vote:prod app/vote
-          docker push $ECR/voting-app-vote:prod
-```
-
-### Deploy a Producción
-
-```yaml
-deploy:
-  needs: build
-  environment: production
-  steps:
-    - name: Setup Terraform
-      run: |
-        terraform init -backend-config="key=voting-app/prod.tfstate"
-        terraform plan -var-file=prod.tfvars
-        terraform apply -auto-approve -var-file=prod.tfvars
-```
-
-### Protección del Ambiente de Producción
+## Protección del Ambiente de Producción
 
 Para garantizar deploys seguros a producción:
 
@@ -135,12 +130,20 @@ Para garantizar deploys seguros a producción:
    - Selecciona los revisores autorizados
 
 Esto establece un quality gate:
-- El job `build` corre automáticamente en push a `main`
-- El job `deploy` requiere aprobación manual de un revisor
+- Los jobs corren automáticamente en push a `main`
+- Los jobs de producción pueden requerir aprobación manual
 - Queda registro de quién aprobó cada deploy
+
+## Ventajas del Enfoque Unificado
+
+- **Secuencia garantizada**: Los jobs se ejecutan en un orden específico, asegurando que la infraestructura exista antes de construir imágenes y que las imágenes existan antes de desplegar.
+- **Flujo completo**: Un solo workflow maneja todo el proceso de CI/CD para cada ambiente.
+- **Simplicidad**: Es más fácil seguir el flujo completo y entender las dependencias.
+- **Consistencia**: Todas las etapas se ejecutan con la misma versión del código.
 
 ## Notas Importantes
 
 - Los scripts de healthcheck necesitan permisos de ejecución (`chmod +x`)
 - Los archivos de entorno deben estar presentes (`.env` o `.env.example`)
 - Las credenciales AWS deben configurarse como secretos en GitHub
+- Los workflows utilizan `aws-actions/configure-aws-credentials@v2` para autenticación AWS

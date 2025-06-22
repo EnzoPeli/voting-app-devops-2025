@@ -1,0 +1,205 @@
+name: "CI/CD Pipeline (Test)"
+
+on:
+  push:
+    branches:
+      - test
+    tags:
+      - 'release/*'
+
+jobs:
+  # Job 1: Ejecutar pruebas de integración
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # 1. Checkout the code
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 2. Install Newman for Postman CLI tests
+      - name: Set up Node.js & Install Newman
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - run: npm install -g newman
+
+      # 3. Prepare env and start Docker Compose
+      - name: Prepare and start services
+        run: |
+          cd app
+          cp .env.example .env
+          chmod +x healthchecks/*.sh
+          docker compose up -d --build
+
+      # 4. Wait for Docker healthchecks
+      - name: Wait for services to be healthy
+        run: |
+          cd app
+          for i in {1..30}; do
+            if docker compose ps | grep -q unhealthy; then
+              echo "Waiting for healthy services... (attempt $i/30)"
+              sleep 5
+            else
+              echo "All services are healthy"
+              break
+            fi
+          done
+
+      # 5. Run Postman tests with Newman
+      - name: Run Postman integration tests
+        working-directory: .
+        run: |
+          newman run tests/Voting-app-Integration-Tests.postman_collection.json \
+            --environment tests/Local.postman_environment.json \
+            --reporters cli,json \
+            --reporter-json-export newman-results.json
+
+      # 6. Upload test results and Docker logs
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-test-results
+          path: newman-results.json
+
+      - name: Teardown services and upload logs
+        if: always()
+        run: |
+          cd app
+          docker compose logs > docker-compose.log
+          docker compose down --volumes
+      - name: Upload Docker Compose logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-compose-logs
+          path: app/docker-compose.log
+
+  # Job 2: Terraform - Infraestructura
+  terraform:
+    name: Terraform Plan & Apply
+    needs: integration-tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="bucket=voting-app-terraform-state-177816" \
+            -backend-config="key=voting-app/test.tfstate" \
+            -backend-config="region=${{ secrets.AWS_DEFAULT_REGION }}"
+
+      - name: Terraform Plan (Test)
+        working-directory: infra
+        run: terraform plan -var-file=test.tfvars
+
+      - name: Terraform Apply (Test)
+        if: github.ref == 'refs/heads/test'
+        working-directory: infra
+        run: terraform apply -auto-approve -var-file=test.tfvars
+
+  # Job 3: Construir y publicar imágenes Docker
+  build:
+    name: Build & Push Docker Images
+    needs: terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push vote image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-vote:test app/vote
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-vote:test
+
+      - name: Build & push result image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-result:test app/result
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-result:test
+      
+      - name: Build & push worker image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker:test app/worker
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker:test
+          
+      - name: Build & push seed-data image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-seed-data:test app/seed-data
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-seed-data:test
+
+  # Job 4: Despliegue en Kubernetes
+  kubernetes:
+    name: Deploy to Kubernetes
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'default'
+          
+      - name: Configure kubectl for EKS
+        run: aws eks update-kubeconfig --name voting-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
+        
+      - name: Create namespace if not exists
+        run: kubectl apply -f k8s/namespace-test.yaml
+        
+      - name: Set environment variables and deploy
+        env:
+          NAMESPACE: test
+        run: |
+          chmod +x ./scripts/apply-manifests.sh
+          ./scripts/apply-manifests.sh
+          
+      - name: Verify deployment
+        run: |
+          echo "Waiting for pods to be ready..."
+          kubectl wait --for=condition=ready pods -n test --all --timeout=300s
+          echo "Current pods status:"
+          kubectl get pods -n test
+          echo "Current services status:"
+          kubectl get services -n test
+          echo "Current ingress status:"
+          kubectl get ingress -n test
