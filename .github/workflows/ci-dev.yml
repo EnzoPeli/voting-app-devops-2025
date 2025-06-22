@@ -168,7 +168,7 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
-          version: 'default'
+          version: 'v1.33.2'
           
       - name: Configure kubectl for EKS
         run: aws eks update-kubeconfig --name voting-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
