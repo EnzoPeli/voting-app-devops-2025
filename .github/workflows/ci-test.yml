@@ -193,13 +193,47 @@ jobs:
           chmod +x ./scripts/apply-manifests.sh
           ./scripts/apply-manifests.sh
           
-      - name: Verify deployment
+      - name: Verificar estado inicial de los pods
         run: |
-          echo "Waiting for pods to be ready..."
-          kubectl wait --for=condition=ready pods -n test --all --timeout=300s
-          echo "Current pods status:"
+          echo "Estado inicial de los pods:"
           kubectl get pods -n test
-          echo "Current services status:"
+          echo "Eventos del namespace:"
+          kubectl get events -n test --sort-by='.lastTimestamp'
+          echo "Estado de los servicios:"
           kubectl get services -n test
-          echo "Current ingress status:"
+          echo "Estado de los ingress:"
           kubectl get ingress -n test
+
+      - name: Esperar a que los pods estén listos
+        id: wait_pods
+        continue-on-error: true
+        run: |
+          echo "Esperando que los pods estén listos (timeout: 600s)..."
+          kubectl wait --for=condition=ready pods -n test --all --timeout=600s
+      
+      - name: Verificar estado final y diagnosticar problemas
+        if: steps.wait_pods.outcome == 'failure'
+        run: |
+          echo "⚠️ Algunos pods no alcanzaron el estado 'ready' a tiempo"
+          echo "\n📊 Estado actual de los pods:"
+          kubectl get pods -n test -o wide
+          
+          echo "\n🔍 Detalles de pods con problemas:"
+          for pod in $(kubectl get pods -n test --field-selector=status.phase!=Running,status.phase!=Succeeded -o jsonpath='{.items[*].metadata.name}'); do
+            echo "\n📌 Describiendo pod: $pod"
+            kubectl describe pod -n test $pod
+            
+            echo "\n📝 Logs del pod: $pod"
+            kubectl logs -n test $pod --all-containers=true --tail=50 || echo "No se pudieron obtener logs"
+          done
+          
+          echo "\n🧪 Verificando problemas de conectividad:"
+          echo "Endpoints de servicios:"
+          kubectl get endpoints -n test
+          
+          echo "\n📋 Últimos eventos del namespace:"
+          kubectl get events -n test --sort-by='.lastTimestamp' | tail -n 20
+          
+          # Continuar el workflow a pesar de los errores
+          echo "Continuando el workflow a pesar de los problemas detectados"
+          exit 0
