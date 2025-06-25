@@ -404,7 +404,6 @@ Se utiliza kubectl para desplegar la aplicación en el cluster EKS.
 ```text
 k8s/
 ├── db/                # Base de datos PostgreSQL
-│   ├── 00-pvc.yaml    # Persistent Volume Claim
 │   ├── 01-deployment.yaml
 │   └── 02-service.yaml
 ├── redis/             # Cola de mensajes Redis
@@ -412,24 +411,44 @@ k8s/
 │   └── 02-service.yaml
 ├── result/            # Frontend de resultados
 │   ├── 01-deployment.yaml
-│   ├── 02-service.yaml
-│   └── 03-ingress.yaml
+│   └── 02-service.yaml
 ├── seed-data/         # Job para cargar datos iniciales
 │   └── job.yaml
 ├── vote/              # Frontend de votación
 │   ├── 01-deployment.yaml
-│   ├── 02-service.yaml
-│   └── 03-ingress.yaml
+│   └── 02-service.yaml
 └── worker/            # Procesador de votos
     └── 01-deployment.yaml
 ```
+
+### Decisiones de Arquitectura
+
+#### Exposición de Servicios con LoadBalancer
+
+Para la exposición de los servicios de la aplicación (Vote y Result), se ha optado por utilizar servicios de tipo LoadBalancer en lugar de un Ingress Controller por las siguientes razones:
+
+1. **Simplicidad operativa**: Cada aplicación tiene su propio punto de entrada con su propia dirección IP/DNS, lo que simplifica la configuración y el diagnóstico de problemas.
+
+2. **Compatibilidad con las aplicaciones**: Las aplicaciones Vote y Result están diseñadas para ejecutarse en la raíz (`/`), lo que causaba conflictos al intentar exponerlas bajo diferentes rutas (`/vote` y `/result`) mediante Ingress.
+
+3. **Evitar problemas con recursos estáticos**: Al usar LoadBalancer, cada aplicación se ejecuta en su propia raíz, evitando problemas con las rutas relativas de los recursos estáticos (CSS, JavaScript).
+
+4. **Aislamiento**: Cada servicio está completamente aislado, lo que facilita la gestión independiente de cada componente.
+
+**Funcionamiento**:
+
+- Cada servicio (Vote y Result) tiene su propio balanceador de carga AWS que recibe tráfico externo.
+- El tráfico se dirige directamente a los pods correspondientes sin necesidad de reescritura de rutas.
+- Los usuarios acceden a cada aplicación a través de diferentes URLs (direcciones IP o DNS asignadas por AWS).
+- Internamente, los servicios Redis y PostgreSQL se mantienen como ClusterIP, accesibles solo dentro del clúster.
+
+**Consideraciones de costo**: Esta arquitectura implica múltiples balanceadores de carga, lo que puede aumentar los costos en AWS. Para entornos de desarrollo o pruebas donde el costo es una preocupación, se podría considerar el uso de servicios NodePort o un único Ingress Controller con configuración adecuada.
 
 ### Componentes de la Aplicación
 
 1. **vote**: Frontend para votar (Python)
    - Deployment: 1 réplica con imagen desde ECR
-   - Service: Expone el puerto 80
-   - Ingress: Ruta `/vote`
+   - Service: Tipo LoadBalancer que expone el puerto 80 externamente
 
 2. **redis**: Cola de mensajes
    - Deployment: 1 réplica con imagen oficial de Redis
@@ -441,14 +460,13 @@ k8s/
    - No expone puertos (proceso en segundo plano)
 
 4. **db**: Base de datos PostgreSQL
-   - PersistentVolumeClaim: 1Gi de almacenamiento persistente
    - Deployment: 1 réplica con imagen oficial de PostgreSQL
+   - Volumen: emptyDir (almacenamiento efímero, los datos se pierden al reiniciar el pod)
    - Service: Expone el puerto 5432 internamente
 
 5. **result**: Frontend para mostrar resultados (Node.js)
    - Deployment: 1 réplica con imagen desde ECR
-   - Service: Expone el puerto 80
-   - Ingress: Ruta `/result`
+   - Service: Tipo LoadBalancer que expone el puerto 80 externamente
 
 6. **seed-data**: Job para cargar datos iniciales
    - Job: Ejecuta una vez para inicializar la base de datos
