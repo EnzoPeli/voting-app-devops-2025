@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: db
+  namespace: ${NAMESPACE}
   labels:
     app: db
 spec:
@@ -39,5 +40,4 @@ spec:
           name: db-data
       volumes:
       - name: db-data
-        persistentVolumeClaim:
-          claimName: postgres-pvc
+        emptyDir: {}

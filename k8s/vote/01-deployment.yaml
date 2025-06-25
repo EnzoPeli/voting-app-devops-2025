@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: vote
   namespace: ${NAMESPACE}
-  labels:
-    app: vote
 spec:
   replicas: 1
   selector:
@@ -16,14 +14,14 @@ spec:
         app: vote
     spec:
       containers:
-      - name: vote
-        image: 255990283375.dkr.ecr.us-east-1.amazonaws.com/voting-app-vote:${NAMESPACE}
-        ports:
-        - containerPort: 80
-        resources:
-          requests:
-            cpu: "250m"
-            memory: "256Mi"
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
+        - name: vote
+          image: 255990283375.dkr.ecr.us-east-1.amazonaws.com/voting-app-vote:${NAMESPACE}
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
