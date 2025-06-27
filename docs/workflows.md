@@ -141,9 +141,24 @@ Esto establece un quality gate:
 - **Simplicidad**: Es más fácil seguir el flujo completo y entender las dependencias.
 - **Consistencia**: Todas las etapas se ejecutan con la misma versión del código.
 
+## Terraform Workspaces en los Pipelines
+
+Los workflows de CI/CD utilizan Terraform Workspaces para separar los estados y recursos por ambiente. Cada pipeline selecciona automáticamente el workspace correspondiente antes de aplicar Terraform:
+
+```yaml
+- name: Seleccionar workspace de Terraform
+  working-directory: infra
+  run: terraform workspace select dev || terraform workspace new dev
+```
+
+Este patrón se repite en todos los pipelines (dev, test, prod) y en el workflow de destroy, cambiando el nombre del workspace según corresponda.
+
+> **Nota**: Para más información sobre Terraform Workspaces y su uso en el proyecto, consulta la sección correspondiente en el [README principal](../README.md#terraform-workspaces).
+
 ## Notas Importantes
 
-- Los scripts de healthcheck necesitan permisos de ejecución (`chmod +x`)
-- Los archivos de entorno deben estar presentes (`.env` o `.env.example`)
-- Las credenciales AWS deben configurarse como secretos en GitHub
+- Los workflows usan variables de entorno y secretos de GitHub para configurar las credenciales de AWS y otros parámetros.
+- Cada ambiente tiene su propio archivo de variables de Terraform (dev.tfvars, test.tfvars, prod.tfvars).
+- Los namespaces de Kubernetes se crean automáticamente durante el despliegue si no existen.
+- Los workspaces de Terraform deben crearse manualmente si no existen cuando se trabaja fuera de los pipelines de CI/CD.
 - Los workflows utilizan `aws-actions/configure-aws-credentials@v2` para autenticación AWS

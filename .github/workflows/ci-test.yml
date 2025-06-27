@@ -102,11 +102,11 @@ jobs:
 
       - name: Initialize Terraform
         working-directory: infra
-        run: |
-          terraform init \
-            -backend-config="bucket=voting-app-terraform-state-177816" \
-            -backend-config="key=voting-app/test.tfstate" \
-            -backend-config="region=${{ secrets.AWS_DEFAULT_REGION }}"
+        run: terraform init
+
+      - name: Seleccionar workspace de Terraform
+        working-directory: infra
+        run: terraform workspace select test || terraform workspace new test
 
       - name: Terraform Plan (Test)
         working-directory: infra
