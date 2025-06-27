@@ -1,0 +1,132 @@
+name: "Destroy Environment"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Entorno a destruir'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+      confirm_destroy:
+        description: 'Confirmar destrucción (escribe el nombre del entorno)'
+        required: true
+        type: string
+      destroy_kubernetes:
+        description: '¿Destruir recursos de Kubernetes antes de la infraestructura?'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  validate:
+    name: Validar Confirmación
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar confirmación
+        run: |
+          if [[ "${{ github.event.inputs.confirm_destroy }}" != "${{ github.event.inputs.environment }}" ]]; then
+            echo "❌ La confirmación no coincide con el entorno seleccionado"
+            echo "Entorno seleccionado: ${{ github.event.inputs.environment }}"
+            echo "Confirmación ingresada: ${{ github.event.inputs.confirm_destroy }}"
+            exit 1
+          fi
+
+  destroy-kubernetes:
+    name: Destruir recursos de Kubernetes
+    needs: validate
+    if: ${{ github.event.inputs.destroy_kubernetes == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Configurar kubectl
+        run: |
+          aws eks update-kubeconfig --name voting-app-${{ github.event.inputs.environment }}-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Eliminar namespace de Kubernetes
+        run: |
+          echo "🧹 Eliminando namespace '${{ github.event.inputs.environment }}'..."
+          kubectl delete namespace ${{ github.event.inputs.environment }} --ignore-not-found=true
+
+  destroy-infrastructure-after-k8s:
+    name: Destruir Infraestructura (después de K8s)
+    needs: destroy-kubernetes
+    if: ${{ github.event.inputs.destroy_kubernetes == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ./infra
+        run: terraform init
+
+      - name: Terraform Destroy
+        working-directory: ./infra
+        run: terraform destroy -auto-approve -var-file=${{ github.event.inputs.environment }}.tfvars
+
+  destroy-infrastructure-direct:
+    name: Destruir Infraestructura (sin K8s)
+    needs: validate
+    if: ${{ github.event.inputs.destroy_kubernetes != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ./infra
+        run: terraform init
+
+      - name: Terraform Destroy
+        working-directory: ./infra
+        run: terraform destroy -auto-approve -var-file=${{ github.event.inputs.environment }}.tfvars
+
+  notify-completion:
+    name: Notificar Finalización
+    needs: [destroy-infrastructure-after-k8s, destroy-infrastructure-direct]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notificación
+        run: echo "✅ Destrucción del entorno '${{ github.event.inputs.environment }}' completada."
