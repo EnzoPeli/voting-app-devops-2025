@@ -98,6 +98,10 @@ jobs:
         working-directory: infra
         run: terraform init
 
+      - name: Seleccionar workspace de Terraform
+        working-directory: infra
+        run: terraform workspace select dev || terraform workspace new dev
+
       - name: Terraform Plan (Dev)
         working-directory: infra
         run: terraform plan -var-file=dev.tfvars

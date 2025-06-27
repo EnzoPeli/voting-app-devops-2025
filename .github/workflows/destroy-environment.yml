@@ -88,6 +88,10 @@ jobs:
         working-directory: ./infra
         run: terraform init
 
+      - name: Seleccionar workspace de Terraform
+        working-directory: ./infra
+        run: terraform workspace select ${{ github.event.inputs.environment }} || terraform workspace new ${{ github.event.inputs.environment }}
+
       - name: Terraform Destroy
         working-directory: ./infra
         run: terraform destroy -auto-approve -var-file=${{ github.event.inputs.environment }}.tfvars
@@ -117,6 +121,10 @@ jobs:
       - name: Terraform Init
         working-directory: ./infra
         run: terraform init
+
+      - name: Seleccionar workspace de Terraform
+        working-directory: ./infra
+        run: terraform workspace select ${{ github.event.inputs.environment }} || terraform workspace new ${{ github.event.inputs.environment }}
 
       - name: Terraform Destroy
         working-directory: ./infra
