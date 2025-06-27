@@ -55,7 +55,7 @@ jobs:
 
       - name: Configurar kubectl
         run: |
-          aws eks update-kubeconfig --name voting-app-${{ github.event.inputs.environment }}-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
+          aws eks update-kubeconfig --name voting-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Eliminar namespace de Kubernetes
         run: |
