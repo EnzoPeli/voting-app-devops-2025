@@ -36,6 +36,7 @@
 voting-app-devops-2025/
 ├── app/            # Código fuente de la Voting-app
 ├── infra/          # Módulos y root de Terraform
+├── k8s/            # Manifiestos de Kubernetes para despliegue en EKS
 ├── .github/        # Workflows de GitHub Actions
 ├── serverless/     # Funciones Lambda
 ├── docs/           # Imágenes, diagramas y guías adicionales
@@ -49,7 +50,7 @@ Para gestionar los tres entornos (Dev, Test y Prod) usamos un flujo de ramas:
 - **Ramas principales**  
   - `develop`: integraciones y despliegue automático a Dev.  
   - `test`: despliegue a Test tras aprobar quality gates.  
-  - `main`: despliegue a Prod, con tagging semántico (`vX.Y.Z`).
+  - `main`: despliegue a Prod, puede usarse con tagging semántico (`vX.Y.Z`).
 
 - **Feature branches**  
   - Se crean desde `develop`:  
@@ -108,7 +109,11 @@ infra/
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   └── outputs.tf
-│   └── security_group/   # Módulo de Security Group (HTTP/SSH)
+│   ├── security_group/   # Módulo de Security Group (HTTP/SSH)
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── eks_cluster/      # Módulo para crear el cluster EKS
 │       ├── main.tf
 │       ├── variables.tf
 │       └── outputs.tf
@@ -146,6 +151,20 @@ infra/
   - `ingress_rules`: Lista de reglas de ingreso configurables (puertos, protocolos, CIDRs)
 - Outputs: `sg_id`
 
+#### eks_cluster (infra/modules/eks_cluster)
+- Crea un cluster EKS y un grupo de nodos para ejecutar la aplicación, 
+- Variables:
+  - `cluster_name`: Nombre del cluster EKS
+  - `node_group_name`: Nombre del grupo de nodos
+  - `cluster_role_arn`: ARN del rol IAM para el plano de control
+  - `node_role_arn`: ARN del rol IAM para los nodos trabajadores
+  - `subnet_ids`: Lista de IDs de subnets donde se desplegará el cluster
+  - `ec2_ssh_key_name`: Nombre de la clave SSH para acceso a los nodos
+  - `instance_types`: Tipos de instancia para los nodos (default: ["t3.small"])
+  - `desired_capacity`, `min_capacity`, `max_capacity`: Configuración de auto-scaling
+  - `node_security_group_ids`: IDs de los security groups para los nodos
+- Outputs: `cluster_name`, `cluster_endpoint`, `cluster_certificate_authority`, `node_group_name`
+
 ### Root Module
 
 En `infra/main.tf` se invocan los módulos y se pasan las variables:
@@ -165,16 +184,51 @@ module "ecr_result" {
   tags   = var.tags
 }
 
+# Repositorio ECR para el servicio seed-data
+module "ecr_seed" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-seed-data"
+  tags   = var.tags
+}
+
+# Repositorio ECR para el servicio worker
+module "ecr_worker" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-worker"
+  tags   = var.tags
+}
+
+# Modulo de Network
 module "network" {
   source               = "./modules/network"
   vpc_cidr             = var.vpc_cidr
   public_subnets_cidrs = var.public_subnets_cidrs
 }
 
+# Modulo de Security Group
 module "security_group" {
   source = "./modules/security_group"
   vpc_id = module.network.vpc_id
 }
+
+# Modulo de EKS Cluster
+module "eks_cluster" {
+  source = "./modules/eks_cluster"
+
+  cluster_name = "voting-app-eks"
+  node_group_name = "voting-app-node-group"
+  cluster_role_arn = data.aws_iam_role.lab_role.arn
+  node_role_arn = data.aws_iam_role.lab_role.arn
+  subnet_ids = module.network.public_subnet_ids
+  ec2_ssh_key_name = "voting-app-ssh-key"
+  instance_types = ["t3.small"]
+  desired_capacity = 2
+  min_capacity = 1
+  max_capacity = 3
+  tags = var.tags
+}
+
+
 ```
 
 Los outputs de todos los módulos se exponen en `infra/outputs.tf`.
@@ -192,6 +246,28 @@ terraform {
     dynamodb_table = "terraform-locks"
   }
 }
+```
+
+### Creacion de Bucket para Terraform State (CLI)
+
+Para crear el bucket y la tabla de DynamoDB para el estado de Terraform, puedes usar el siguiente script:
+```bash
+export AWS_PROFILE=default
+export AWS_REGION=us-east-1
+export TF_STATE_BUCKET=voting-app-terraform-state-177816
+export DYNAMO_LOCK_TABLE=terraform-locks
+
+# Crear el bucket para el estado de Terraform
+aws s3 mb s3://$TF_STATE_BUCKET --region $AWS_REGION
+
+# Crear la tabla de DynamoDB para el locking
+aws dynamodb create-table \
+  --table-name $DYNAMO_LOCK_TABLE \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region $AWS_REGION
+
 ```
 
 - **bucket**: `voting-app-terraform-state-177816`
@@ -223,49 +299,47 @@ terraform apply -auto-approve -var-file=dev.tfvars
 
 ## CI/CD
 
-La integración y entrega continua se implementa con GitHub Actions. Los workflows actuales son:
+La aplicación utiliza GitHub Actions para automatizar el proceso de CI/CD, con flujos de trabajo específicos para cada ambiente.
 
-### 1. Infraestructura (Terraform)
+### Pipelines de CI/CD
 
-- **Archivo**: `.github/workflows/terraform-dev.yml`
-- **Nombre**: "Terraform Plan & Apply (Dev)"
-- **Disparador**: push a la rama `develop`
-- **Jobs**:
-  1. `terraform`
-     - Configura credenciales AWS
-     - Setup Terraform
-     - `terraform init`
-     - `terraform plan -var-file=dev.tfvars`
-     - `terraform apply -auto-approve -var-file=dev.tfvars`
+El proyecto implementa una estrategia de CI/CD con pipelines unificados por ambiente:
 
-### 2. Análisis Estático y Build de Contenedores
+#### Flujo de Despliegue Automatizado
 
-- **Archivo**: `.github/workflows/docker-dev.yml`
-- **Nombre**: "CI – Static Analysis & Docker Build (Dev)"
-- **Disparador**: push a la rama `develop`
-- **Jobs**:
-  1. `static-analysis` (matriz por servicio)
-     - Python (vote, seed-data): flake8
-     - Node.js (result): eslint
-     - C# (worker): dotnet format
-     - Genera reportes y sube artefactos
-  2. `docker`
-     - Depende de `static-analysis`
-     - Login en ECR
-     - Build y push de imágenes
+El proceso de CI/CD está configurado para desplegar automáticamente en el entorno correspondiente:
 
-### (Pendiente) Workflows Futuros
+1. **Workflow [ci-dev.yml]**:
+   - Se ejecuta al hacer push a la rama `develop`
+   - Realiza análisis estático de código
+   - Aplica la infraestructura con Terraform usando `dev.tfvars`
+   - Construye y publica las imágenes Docker con tag `:dev`
+   - Despliega la aplicación en el namespace `dev`
 
-1. **Test**
-   - Pruebas de integración
-   - Validación de endpoints
-   - Pruebas de carga
+2. **Workflow [ci-test.yml]**:
+   - Se ejecuta al hacer push a la rama `test`
+   - Ejecuta pruebas de integración
+   - Aplica la infraestructura con Terraform usando `test.tfvars`
+   - Construye y publica las imágenes Docker con tag `:test`
+   - Despliega la aplicación en el namespace `test`
 
-2. **Producción**
-   - Deploy a ECS/EKS
-   - Control de versiones
-   - Gates de calidad
+3. **Workflow [ci-prod.yml]**:
+   - Se ejecuta al hacer push a la rama `main` o tags `v*.*.*`
+   - Aplica la infraestructura con Terraform usando `prod.tfvars`
+   - Construye y publica las imágenes Docker con tag `:prod`
+   - Despliega la aplicación en el namespace `prod`
+   - Utiliza protecciones adicionales del entorno `production`
 
+Para más detalles sobre los workflows, consulta [docs/workflows.md](docs/workflows.md).
+
+#### Ventajas de este Enfoque
+
+- **Aislamiento**: Cada entorno opera de forma independiente sin interferir con otros
+- **Consistencia**: Mismos manifiestos para todos los entornos, reduciendo duplicación
+- **Trazabilidad**: Clara separación entre versiones de desarrollo, test y producción
+- **Facilidad de gestión**: Comandos kubectl pueden filtrarse por namespace
+- **Seguridad**: Posibilidad de aplicar diferentes políticas de RBAC por entorno
+- **Secuencia garantizada**: Los jobs se ejecutan en un orden específico, asegurando dependencias correctas
 ---
 
 > **Variables / Secrets** necesarios:  
@@ -284,12 +358,10 @@ Los microservicios de la Voting-app se empaquetan en contenedores Docker y se or
   - Base: `python:3.11-slim`
   - Expone puerto `80` (mapeado a `8080` en host)
   - Health-check: `curl -f http://localhost`
-  - Modo desarrollo: detecta cambios en archivos Python y reinicia automáticamente el servidor
 
 - **app/result**
   - Base: Node.js
   - Expone puerto `80` (mapeado a `8081` en host)
-  - Modo desarrollo: reinicia automáticamente el servidor y permite depuración remota
 
 - **app/seed-data**
   - Job que carga datos iniciales en la base de datos
@@ -302,12 +374,7 @@ Los microservicios de la Voting-app se empaquetan en contenedores Docker y se or
 
 ### Levantar el stack local
 
-Se proporciona un `docker-compose.yml` en `app/` con las siguientes características:
-
-- Redes: `front-tier` y `back-tier`
-- Healthchecks configurados
-- Volúmenes para desarrollo
-- Perfiles para seed-data
+Se proporciona un `docker-compose.yml` en `app/`.
 
 ```bash
 # Configurar variables de entorno
@@ -327,10 +394,179 @@ docker compose --profile seed up --build -d seed
 docker compose down --volumes
 ```
 
+## Orquestación con Kubernetes (EKS)
+
+La aplicación está configurada para ser desplegada en un cluster de Kubernetes gestionado por AWS (EKS). Los manifiestos se encuentran en el directorio `k8s/`, organizados por componente.
+Se utiliza kubectl para desplegar la aplicación en el cluster EKS.
+
+### Estructura de Manifiestos
+
+```text
+k8s/
+├── db/                # Base de datos PostgreSQL
+│   ├── 01-deployment.yaml
+│   └── 02-service.yaml
+├── redis/             # Cola de mensajes Redis
+│   ├── 01-deployment.yaml
+│   └── 02-service.yaml
+├── result/            # Frontend de resultados
+│   ├── 01-deployment.yaml
+│   └── 02-service.yaml
+├── seed-data/         # Job para cargar datos iniciales
+│   └── job.yaml
+├── vote/              # Frontend de votación
+│   ├── 01-deployment.yaml
+│   └── 02-service.yaml
+└── worker/            # Procesador de votos
+    └── 01-deployment.yaml
+```
+
+### Decisiones de Arquitectura
+
+#### Exposición de Servicios con LoadBalancer
+
+Para la exposición de los servicios de la aplicación (Vote y Result), se ha optado por utilizar servicios de tipo LoadBalancer en lugar de un Ingress Controller por las siguientes razones:
+
+1. **Simplicidad operativa**: Cada aplicación tiene su propio punto de entrada con su propia dirección IP/DNS, lo que simplifica la configuración y el diagnóstico de problemas.
+
+2. **Compatibilidad con las aplicaciones**: Las aplicaciones Vote y Result están diseñadas para ejecutarse en la raíz (`/`), lo que causaba conflictos al intentar exponerlas bajo diferentes rutas (`/vote` y `/result`) mediante Ingress.
+
+3. **Evitar problemas con recursos estáticos**: Al usar LoadBalancer, cada aplicación se ejecuta en su propia raíz, evitando problemas con las rutas relativas de los recursos estáticos (CSS, JavaScript).
+
+4. **Aislamiento**: Cada servicio está completamente aislado, lo que facilita la gestión independiente de cada componente.
+
+**Funcionamiento**:
+
+- Cada servicio (Vote y Result) tiene su propio balanceador de carga AWS que recibe tráfico externo.
+- El tráfico se dirige directamente a los pods correspondientes sin necesidad de reescritura de rutas.
+- Los usuarios acceden a cada aplicación a través de diferentes URLs (direcciones IP o DNS asignadas por AWS).
+- Internamente, los servicios Redis y PostgreSQL se mantienen como ClusterIP, accesibles solo dentro del clúster.
+
+**Consideraciones de costo**: Esta arquitectura implica múltiples balanceadores de carga, lo que puede aumentar los costos en AWS. Para entornos de desarrollo o pruebas donde el costo es una preocupación, se podría considerar el uso de servicios NodePort o un único Ingress Controller con configuración adecuada.
+
+### Componentes de la Aplicación
+
+1. **vote**: Frontend para votar (Python)
+   - Deployment: 1 réplica con imagen desde ECR
+   - Service: Tipo LoadBalancer que expone el puerto 80 externamente
+
+2. **redis**: Cola de mensajes
+   - Deployment: 1 réplica con imagen oficial de Redis
+   - Service: Expone el puerto 6379 internamente
+
+3. **worker**: Procesador de votos (C#)
+   - Deployment: 1 réplica con imagen desde ECR
+   - Conecta Redis con PostgreSQL
+   - No expone puertos (proceso en segundo plano)
+
+4. **db**: Base de datos PostgreSQL
+   - Deployment: 1 réplica con imagen oficial de PostgreSQL
+   - Volumen: emptyDir (almacenamiento efímero, los datos se pierden al reiniciar el pod)
+   - Service: Expone el puerto 5432 internamente
+
+5. **result**: Frontend para mostrar resultados (Node.js)
+   - Deployment: 1 réplica con imagen desde ECR
+   - Service: Tipo LoadBalancer que expone el puerto 80 externamente
+
+6. **seed-data**: Job para cargar datos iniciales
+   - Job: Ejecuta una vez para inicializar la base de datos
+
+### Despliegue en EKS
+
+Para desplegar la aplicación en el cluster EKS:
+
+```bash
+# Configurar kubectl para conectar con el cluster EKS
+aws eks update-kubeconfig --name voting-cluster --region us-east-1
+
+# Verificar conexión
+kubectl get nodes
+
+# Desplegar componentes de infraestructura
+kubectl apply -f k8s/db/
+kubectl apply -f k8s/redis/
+
+# Desplegar aplicación
+kubectl apply -f k8s/worker/
+kubectl apply -f k8s/vote/
+kubectl apply -f k8s/result/
+
+# Cargar datos iniciales (opcional)
+kubectl apply -f k8s/seed-data/
+
+# Verificar estado
+kubectl get pods
+kubectl get services
+kubectl get ingress
+```
+
+> **Nota**: Los Ingress requieren un controlador de Ingress como NGINX Ingress Controller instalado en el cluster.
+
+### Estrategia de Despliegue Multi-entorno
+
+La aplicación está diseñada para ser desplegada en múltiples entornos (desarrollo, test, producción) utilizando una estrategia de parametrización basada en namespaces de Kubernetes.
+
+#### Separación por Namespaces
+
+Utilizamos namespaces de Kubernetes para aislar los entornos:
+
+- **Namespace `dev`**: Entorno de desarrollo, desplegado automáticamente desde la rama `develop`
+- **Namespace `test`**: Entorno de test, desplegado desde la rama `test`
+- **Namespace `prod`**: Entorno de producción, desplegado desde la rama `main`
+
+#### Parametrización de Manifiestos
+
+Los manifiestos de Kubernetes están parametrizados usando variables de entorno:
+
+1. **Variable `${NAMESPACE}`**: Se utiliza para:
+   - Definir el namespace en cada recurso
+   - Especificar la etiqueta de imagen correcta (dev/prod/test)
+
+2. **Proceso de reemplazo de variables**:
+   - El script `scripts/apply-manifests.sh` utiliza `envsubst` para reemplazar las variables antes de aplicar los manifiestos
+   - Esto permite mantener un único conjunto de manifiestos para todos los entornos
+
+```bash
+# Ejemplo de uso del script
+NAMESPACE=dev ./scripts/apply-manifests.sh  # Para desarrollo
+NAMESPACE=test ./scripts/apply-manifests.sh  # Para test
+NAMESPACE=prod ./scripts/apply-manifests.sh  # Para producción
+```
+
+#### Flujo de Despliegue Automatizado
+
+El proceso de CI/CD está configurado para desplegar automáticamente en el entorno correspondiente:
+
+1. **Workflow `terraform-dev.yml`**:
+   - Se ejecuta al hacer push a la rama `develop`
+   - Aplica la infraestructura con Terraform usando `dev.tfvars`
+   - Despliega la aplicación en el namespace `dev` con las imágenes etiquetadas como `dev`
+
+2. **Workflow `terraform-test.yml`**:
+   - Se ejecuta al hacer push a la rama `test`
+   - Aplica la infraestructura con Terraform usando `test.tfvars`
+   - Despliega la aplicación en el namespace `test` con las imágenes etiquetadas como `test`
+
+3. **Workflow `terraform-prod.yml`**:
+   - Se ejecuta al hacer push a la rama `main`
+   - Aplica la infraestructura con Terraform usando `prod.tfvars`
+   - Despliega la aplicación en el namespace `prod` con las imágenes etiquetadas como `prod`
+
+
+
+#### Ventajas de este Enfoque
+
+- **Aislamiento**: Cada entorno opera de forma independiente sin interferir con otros
+- **Consistencia**: Mismos manifiestos para todos los entornos, reduciendo duplicación
+- **Trazabilidad**: Clara separación entre versiones de desarrollo, test y producción
+- **Facilidad de gestión**: Comandos kubectl pueden filtrarse por namespace
+- **Seguridad**: Posibilidad de aplicar diferentes políticas de RBAC por entorno
+
 > **Nota**: El archivo `.env` contiene las variables de entorno necesarias para los servicios:
 > - Credenciales de PostgreSQL
 > - Configuración de Redis
 > - Puertos de servicios
+> Se creo  el .evn como muestra de una practica de seguridad.
 
 ## Pruebas locales con Docker Compose
 

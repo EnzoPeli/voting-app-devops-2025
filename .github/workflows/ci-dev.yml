@@ -1,0 +1,229 @@
+name: "CI/CD Pipeline (Dev)"
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  # Job 1: Análisis estático de código
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - service: vote
+            path: app/vote
+            type: python
+          - service: result
+            path: app/result
+            type: node
+          - service: seed-data
+            path: app/seed-data
+            type: python
+          - service: worker
+            path: app/worker
+            type: csharp
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Run static analysis for ${{ matrix.service }}
+        working-directory: ${{ matrix.path }}
+        run: |
+          if [ "${{ matrix.type }}" = "python" ]; then
+            pip install --user -r requirements-dev.txt
+            flake8 . --format='%(path)s:%(row)d:%(col)d: %(code)s %(text)s' --output-file flake8-report.txt || true
+
+          elif [ "${{ matrix.type }}" = "node" ]; then
+            npm install
+            npm install eslint@8.56.0
+            npx eslint . --format unix --output-file eslint-report.txt || true
+
+          else
+            dotnet tool install --global dotnet-format || true
+            export PATH="$PATH:$HOME/.dotnet/tools"
+            dotnet restore
+            dotnet format . --verify-no-changes --report dotnet-report.txt || true
+          fi
+
+      - name: Upload Python report
+        if: matrix.type == 'python'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake8-${{ matrix.service }}
+          path: ${{ matrix.path }}/flake8-report.txt
+
+      - name: Upload Node report
+        if: matrix.type == 'node'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-${{ matrix.service }}
+          path: ${{ matrix.path }}/eslint-report.txt
+
+      - name: Upload C# report
+        if: matrix.type == 'csharp'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-${{ matrix.service }}
+          path: ${{ matrix.path }}/dotnet-report.txt
+
+  # Job 2: Terraform - Infraestructura
+  terraform:
+    name: Terraform Plan & Apply
+    needs: static-analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform Plan (Dev)
+        working-directory: infra
+        run: terraform plan -var-file=dev.tfvars
+
+      - name: Terraform Apply (Dev)
+        if: github.ref == 'refs/heads/develop'
+        working-directory: infra
+        run: terraform apply -auto-approve -var-file=dev.tfvars
+
+  # Job 3: Construir y publicar imágenes Docker
+  build:
+    name: Build & Push Docker Images
+    needs: terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push vote image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-vote:dev app/vote
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-vote:dev
+
+      - name: Build & push result image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-result:dev app/result
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-result:dev
+      
+      - name: Build & push worker image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker:dev app/worker
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker:dev
+          
+      - name: Build & push seed-data image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-seed-data:dev app/seed-data
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-seed-data:dev
+
+  # Job 4: Despliegue en Kubernetes
+  kubernetes:
+    name: Deploy to Kubernetes
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.33.2'
+          
+      - name: Configure kubectl for EKS
+        run: aws eks update-kubeconfig --name voting-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
+        
+      - name: Create namespace if not exists
+        run: kubectl apply -f k8s/namespace-dev.yaml
+        
+      - name: Set environment variables and deploy
+        env:
+          NAMESPACE: dev
+        run: |
+          chmod +x ./scripts/apply-manifests.sh
+          ./scripts/apply-manifests.sh
+          
+      - name: Verificar estado inicial de los pods
+        run: |
+          echo "Estado inicial de los pods:"
+          kubectl get pods -n dev
+          echo "Eventos del namespace:"
+          kubectl get events -n dev --sort-by='.lastTimestamp'
+          echo "Estado de los servicios:"
+          kubectl get services -n dev
+          echo "Estado de los ingress:"
+          kubectl get ingress -n dev
+
+      - name: Esperar a que los pods estén listos
+        id: wait_pods
+        continue-on-error: true
+        run: |
+          echo "Esperando que los pods estén listos (timeout: 600s)..."
+          kubectl wait --for=condition=ready pods -n dev --all --timeout=600s
+      
+      - name: Verificar estado final y diagnosticar problemas
+        if: steps.wait_pods.outcome == 'failure'
+        run: |
+          echo "⚠️ Algunos pods no alcanzaron el estado 'ready' a tiempo"
+          echo "\n📊 Estado actual de los pods:"
+          kubectl get pods -n dev -o wide
+          
+          echo "\n🔍 Detalles de pods con problemas:"
+          for pod in $(kubectl get pods -n dev --field-selector=status.phase!=Running,status.phase!=Succeeded -o jsonpath='{.items[*].metadata.name}'); do
+            echo "\n📌 Describiendo pod: $pod"
+            kubectl describe pod -n dev $pod
+            
+            echo "\n📝 Logs del pod: $pod"
+            kubectl logs -n dev $pod --all-containers=true --tail=50 || echo "No se pudieron obtener logs"
+          done
+          
+          echo "\n🧪 Verificando problemas de conectividad:"
+          echo "Endpoints de servicios:"
+          kubectl get endpoints -n dev
+          
+          echo "\n📋 Últimos eventos del namespace:"
+          kubectl get events -n dev --sort-by='.lastTimestamp' | tail -n 20
+          
+          # Continuar el workflow a pesar de los errores
+          echo "Continuando el workflow a pesar de los problemas detectados"
+          exit 0

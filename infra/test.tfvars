@@ -15,6 +15,6 @@ availability_zones = [
 ]
 
 tags = {
-  Environment = "dev"
+  Environment = "test"
   Project     = "voting-app"
 }
