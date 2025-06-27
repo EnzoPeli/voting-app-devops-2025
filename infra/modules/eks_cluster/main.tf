@@ -22,7 +22,7 @@ resource "aws_eks_node_group" "this" {
   }
 
   instance_types = var.instance_types
-  ami_type       = "AL2023_x86_64"
+  ami_type       = "AL2023_x86_64_STANDARD"
 
   remote_access {
     ec2_ssh_key = var.ec2_ssh_key_name
