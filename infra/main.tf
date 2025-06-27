@@ -25,26 +25,26 @@ provider "aws" {
 # ECR Repositories
 module "ecr_vote" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-vote"
-  tags   = var.tags
+  name   = "voting-app-vote-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
 }
 
 module "ecr_result" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-result"
-  tags   = var.tags
+  name   = "voting-app-result-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
 }
 
 module "ecr_seed" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-seed-data"
-  tags   = var.tags
+  name   = "voting-app-seed-data-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
 }
 
 module "ecr_worker" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-worker"
-  tags   = var.tags
+  name   = "voting-app-worker-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
 }
 
 
@@ -92,7 +92,7 @@ resource "tls_private_key" "ssh_key" {
 }
 
 resource "aws_key_pair" "voting_key" {
-  key_name   = "voting-key"
+  key_name   = "voting-key-${terraform.workspace}"
   public_key = tls_private_key.ssh_key.public_key_openssh
 }
 

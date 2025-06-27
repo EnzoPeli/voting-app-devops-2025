@@ -296,6 +296,86 @@ terraform plan -var-file=dev.tfvars
 terraform apply -auto-approve -var-file=dev.tfvars
 ```
 
+### Terraform Workspaces
+
+El proyecto utiliza Terraform Workspaces para separar los estados y recursos por ambiente (dev, test, prod). Esto permite mantener configuraciones independientes para cada entorno mientras se comparte el mismo código base.
+
+#### Configuración Inicial
+
+Antes de ejecutar los pipelines de CI/CD o trabajar con Terraform manualmente, es necesario realizar estos pasos iniciales:
+
+1. **Crear el bucket S3 y la tabla DynamoDB** para el backend:
+   ```bash
+   # Crear bucket S3 (si no existe)
+   aws s3api create-bucket --bucket voting-app-terraform-state-177816 --region us-east-1
+   
+   # Habilitar versionamiento en el bucket
+   aws s3api put-bucket-versioning --bucket voting-app-terraform-state-177816 --versioning-configuration Status=Enabled
+   
+   # Crear tabla DynamoDB para locks
+   aws dynamodb create-table --table-name terraform-locks \
+     --attribute-definitions AttributeName=LockID,AttributeType=S \
+     --key-schema AttributeName=LockID,KeyType=HASH \
+     --billing-mode PAY_PER_REQUEST \
+     --region us-east-1
+   ```
+
+2. **Inicializar Terraform** por primera vez:
+   ```bash
+   cd infra
+   terraform init
+   ```
+
+3. **Crear los workspaces** para cada ambiente:
+   ```bash
+   terraform workspace new dev
+   terraform workspace new test
+   terraform workspace new prod
+   ```
+
+> **Nota**: Los pipelines de CI/CD están configurados para crear los workspaces automáticamente si no existen, pero es recomendable crearlos manualmente la primera vez para verificar que todo funcione correctamente.
+
+#### Características de los Workspaces
+
+- **Estados separados**: Cada workspace tiene su propio archivo de estado en S3, siguiendo el patrón `s3://voting-app-terraform-state-177816/voting-app/env:/WORKSPACE/terraform.tfstate`.
+- **Recursos parametrizados**: Los recursos críticos como repositorios ECR incluyen el nombre del workspace en su identificador para evitar conflictos entre ambientes:
+  ```hcl
+  module "ecr_vote" {
+    source = "./modules/ecr-repo"
+    name   = "voting-app-vote-${terraform.workspace}"
+    tags   = merge(var.tags, { Environment = terraform.workspace })
+  }
+  ```
+- **Aislamiento completo**: Cada ambiente opera de forma independiente, con sus propios recursos y configuraciones.
+
+#### Uso de Workspaces
+
+##### Uso manual
+
+Para trabajar con workspaces manualmente:
+
+1. **Listar workspaces disponibles**:
+   ```bash
+   terraform workspace list
+   ```
+
+2. **Crear un nuevo workspace** (si no existe):
+   ```bash
+   terraform workspace new dev
+   ```
+
+3. **Seleccionar un workspace existente**:
+   ```bash
+   terraform workspace select dev
+   ```
+
+4. **Ver el workspace actual**:
+   ```bash
+   terraform workspace show
+   ```
+
+> **IMPORTANTE**: Antes de aplicar Terraform manualmente, asegúrate siempre de estar en el workspace correcto usando `terraform workspace show`.
+
 
 ## CI/CD
 
