@@ -1,0 +1,52 @@
+# Environment variables (todos los servicios)
+.env
+.env.*
+!.env.example
+
+# Python (vote y seed-data)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node.js (result)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# .NET (worker)
+bin/
+obj/
+*.user
+*.userosscache
+*.suo
+project.lock.json
+.vs/
+
+# Docker
+.docker/
+
+# Terraform (infra/)
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# IDEs y editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

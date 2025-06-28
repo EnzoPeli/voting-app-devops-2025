@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-data
+  namespace: ${NAMESPACE}
+  labels:
+    app: seed-data
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: seed-data
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: seed-data
+        image: 255990283375.dkr.ecr.us-east-1.amazonaws.com/voting-app-seed-data-${NAMESPACE}:${NAMESPACE}  
+        env:
+        - name: POSTGRES_HOST
+          value: "db"
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"

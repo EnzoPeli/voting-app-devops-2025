@@ -1,0 +1,173 @@
+name: "CI/CD Pipeline (Prod)"
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  # Job 1: Terraform - Infraestructura
+  terraform:
+    name: Terraform Plan & Apply
+    runs-on: ubuntu-latest
+    environment: production # Usar entorno de GitHub para protección adicional
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        working-directory: infra
+        run: terraform init
+
+      - name: Seleccionar workspace de Terraform
+        working-directory: infra
+        run: terraform workspace select prod || terraform workspace new prod
+
+      - name: Terraform Plan (Prod)
+        working-directory: infra
+        run: terraform plan -var-file=prod.tfvars
+
+      - name: Terraform Apply (Prod)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        working-directory: infra
+        run: terraform apply -auto-approve -var-file=prod.tfvars
+
+  # Job 2: Construir y publicar imágenes Docker
+  build:
+    name: Build & Push Docker Images
+    needs: terraform
+    runs-on: ubuntu-latest
+    environment: production # Usar entorno de GitHub para protección adicional
+    
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push vote image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-vote-prod:prod app/vote
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-vote-prod:prod
+
+      - name: Build & push result image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-result-prod:prod app/result
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-result-prod:prod
+      
+      - name: Build & push worker image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker-prod:prod app/worker
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-worker-prod:prod
+          
+      - name: Build & push seed-data image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-seed-data-prod:prod app/seed-data
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/voting-app-seed-data-prod:prod
+
+  # Job 3: Despliegue en Kubernetes
+  kubernetes:
+    name: Deploy to Kubernetes
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production # Usar entorno de GitHub para protección adicional
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.33.2'
+          
+      - name: Configure kubectl for EKS
+        run: aws eks update-kubeconfig --name voting-cluster --region ${{ secrets.AWS_DEFAULT_REGION }}
+        
+      - name: Create namespace if not exists
+        run: kubectl apply -f k8s/namespace-prod.yaml
+        
+      - name: Set environment variables and deploy
+        env:
+          NAMESPACE: prod
+        run: |
+          chmod +x ./scripts/apply-manifests.sh
+          ./scripts/apply-manifests.sh
+          
+      - name: Verificar estado inicial de los pods
+        run: |
+          echo "Estado inicial de los pods:"
+          kubectl get pods -n prod
+          echo "Eventos del namespace:"
+          kubectl get events -n prod --sort-by='.lastTimestamp'
+          echo "Estado de los servicios:"
+          kubectl get services -n prod
+          echo "Estado de los ingress:"
+          kubectl get ingress -n prod
+
+      - name: Esperar a que los pods estén listos
+        id: wait_pods
+        continue-on-error: true
+        run: |
+          echo "Esperando que los pods estén listos (timeout: 600s)..."
+          kubectl wait --for=condition=ready pods -n prod --all --timeout=600s
+      
+      - name: Verificar estado final y diagnosticar problemas
+        if: steps.wait_pods.outcome == 'failure'
+        run: |
+          echo "⚠️ Algunos pods no alcanzaron el estado 'ready' a tiempo"
+          echo "\n📊 Estado actual de los pods:"
+          kubectl get pods -n prod -o wide
+          
+          echo "\n🔍 Detalles de pods con problemas:"
+          for pod in $(kubectl get pods -n prod --field-selector=status.phase!=Running,status.phase!=Succeeded -o jsonpath='{.items[*].metadata.name}'); do
+            echo "\n📌 Describiendo pod: $pod"
+            kubectl describe pod -n prod $pod
+            
+            echo "\n📝 Logs del pod: $pod"
+            kubectl logs -n prod $pod --all-containers=true --tail=50 || echo "No se pudieron obtener logs"
+          done
+          
+          echo "\n🧪 Verificando problemas de conectividad:"
+          echo "Endpoints de servicios:"
+          kubectl get endpoints -n prod
+          
+          echo "\n📋 Últimos eventos del namespace:"
+          kubectl get events -n prod --sort-by='.lastTimestamp' | tail -n 20
+          
+          # Continuar el workflow a pesar de los errores
+          echo "Continuando el workflow a pesar de los problemas detectados"
+          exit 0
