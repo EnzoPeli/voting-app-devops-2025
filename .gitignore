@@ -50,3 +50,6 @@ project.lock.json
 # OS
 .DS_Store
 Thumbs.db
+
+# zip
+*.zip

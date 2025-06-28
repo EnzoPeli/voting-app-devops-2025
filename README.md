@@ -676,27 +676,35 @@ El proyecto implementa un sistema de alertas serverless que funciona como un "vi
 └────────────────┘    └────────────────┘    └────────────────┘
 ```
 
-#### Flujo de una alerta
+#### Flujos de alertas implementados
 
-Ejemplo de como funciona el sistema de alertas:
+El sistema actualmente monitorea dos escenarios específicos:
 
-1. **Se produce un error en la función Lambda**.
+##### Escenario 1: Error en la función Lambda
 
-2. **CloudWatch detecta el problema**.
+1. **Se produce un error en la función Lambda** - La función `voting-app-alerts-${terraform.workspace}` falla durante su ejecución.
 
-3. **Se activa una alarma**.
+2. **CloudWatch detecta el error** - La métrica `Errors` de la función Lambda supera el umbral de 0.
 
-4. **La alarma invoca la función Lambda** - El evento se envía a nuestra función `voting-app-alerts-${terraform.workspace}`.
+3. **Se activa la alarma `${var.prefix}-alerts-errors-${terraform.workspace}`** - CloudWatch genera un evento de alarma.
 
-5. **Lambda procesa el evento** - El código Python:
-   - Extrae la información relevante (servicio afectado, cantidad de errores, timestamp)
-   - Formatea un mensaje legible: "ALERTA: El servicio de votación está experimentando errores 500. Se detectaron 8 errores en los últimos 60 segundos."
-   - Añade contexto y recomendaciones: "Revisa los logs en CloudWatch. Posible causa: problemas de conexión con Redis."
+4. **El evento se envía al tema SNS** - La notificación se publica directamente en `voting-app-alerts-${terraform.workspace}`.
 
-6. **Lambda publica en SNS** - La función envía el mensaje al tema SNS `voting-app-alerts-${terraform.workspace}`.
+5. **SNS distribuye la notificación** - Los suscriptores reciben un email con el asunto "ALARM: Lambda Function Error Alert".
 
-7. **SNS distribuye la notificación** - El tema envía la alerta a todos los suscriptores:
-   - Email con el asunto "ALERTA: Errores en servicio de votación"
+##### Escenario 2: Alta utilización de CPU en EKS
+
+1. **El cluster EKS experimenta alta carga de CPU** - La utilización de CPU supera el 80%.
+
+2. **CloudWatch detecta el problema** - La métrica `node_cpu_utilization` del namespace `ContainerInsights` supera el umbral durante 2 periodos consecutivos de 5 minutos.
+
+3. **Se activa la alarma `eks-cpu-utilization-${terraform.workspace}`** - CloudWatch genera un evento de alarma.
+
+4. **El evento se envía al tema SNS** - La notificación se publica en `voting-app-alerts-${terraform.workspace}`.
+
+5. **SNS distribuye la notificación** - Los suscriptores reciben un email con el asunto "ALARM: EKS CPU Utilization Alert".
+
+6. **El equipo recibe la alerta y actúa** - Los operadores pueden revisar el dashboard CloudWatch `eks-monitoring-${terraform.workspace}` para analizar las métricas de CPU (promedio y percentiles p50/p95) y tomar las acciones necesarias.
 
 
 
@@ -716,8 +724,12 @@ Ejemplo de como funciona el sistema de alertas:
 
 3. **Alarmas CloudWatch**:
    - Monitoreo de errores de la función Lambda
-   - Monitoreo de duración de ejecución
+   - Monitoreo de CPU del cluster EKS (threshold 80%)
    - Notificaciones automáticas cuando se superan umbrales
+
+4. **Dashboard CloudWatch**:
+   - Visualización de métricas de CPU del cluster EKS
+   - Gráficas de utilización promedio y percentiles (p50/p95)
 
 
 #### Variables Configurables
