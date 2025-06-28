@@ -21,7 +21,7 @@ def lambda_handler(event, context):
             logger.error("Generando error para pruebas")
             # Simular un proceso largo para activar la alarma de duración
             import time
-            time.sleep(6)  # Dormir 6 segundos para superar el umbral de 5 segundos
+            time.sleep(6)  # Demorar 6 segundos para superar el umbral de 5 segundos
             # Lanzar una excepción para probar el manejo de errores
             raise Exception("Error generado para pruebas")
         
