@@ -83,6 +83,10 @@ El proyecto utiliza un tablero Kanban en GitHub Projects con las siguientes colu
 
 ![Estado 2 del Kanban](docs/second-kanban.png)
 
+### Estado 3
+
+![Estado 3 del Kanban](docs/third-kanban.png)
+
 Cada tarjeta del tablero corresponde a un Issue en GitHub, etiquetado con su Épica y prioridad (P0–P2). El flujo de trabajo es:
 
 1. Se crea el Issue en **Backlog**.  
@@ -654,3 +658,88 @@ Seguir los pasos anteriores en la sección "Levantar el stack local" para probar
 
 - Interfaz de votación: http://localhost:8080
 - Interfaz de resultados: http://localhost:8081
+
+## Serverless
+
+El proyecto implementa un sistema de alertas serverless que funciona como un "vigilante automático" para la infraestructura, monitoreando la aplicación y notificando cuando se detectan problemas.
+
+### Sistema de Alertas Lambda:
+
+#### Arquitectura y Componentes
+
+```
+┌────────────────┐    ┌────────────────┐    ┌────────────────┐
+│                │    │                │    │                │
+│  CloudWatch    │───▶│  Lambda        │───▶│  SNS Topic     │───▶ Email
+│  Events/Alarms │    │  Function      │    │                │
+│                │    │                │    │                │
+└────────────────┘    └────────────────┘    └────────────────┘
+```
+
+#### Flujo de una alerta
+
+Ejemplo de como funciona el sistema de alertas:
+
+1. **Se produce un error en la función Lambda**.
+
+2. **CloudWatch detecta el problema**.
+
+3. **Se activa una alarma**.
+
+4. **La alarma invoca la función Lambda** - El evento se envía a nuestra función `voting-app-alerts-${terraform.workspace}`.
+
+5. **Lambda procesa el evento** - El código Python:
+   - Extrae la información relevante (servicio afectado, cantidad de errores, timestamp)
+   - Formatea un mensaje legible: "ALERTA: El servicio de votación está experimentando errores 500. Se detectaron 8 errores en los últimos 60 segundos."
+   - Añade contexto y recomendaciones: "Revisa los logs en CloudWatch. Posible causa: problemas de conexión con Redis."
+
+6. **Lambda publica en SNS** - La función envía el mensaje al tema SNS `voting-app-alerts-${terraform.workspace}`.
+
+7. **SNS distribuye la notificación** - El tema envía la alerta a todos los suscriptores:
+   - Email con el asunto "ALERTA: Errores en servicio de votación"
+
+
+
+#### Componentes Principales
+
+1. **Función Lambda (`alert.py`)**:
+   - Procesa eventos recibidos desde CloudWatch u otras fuentes
+   - Formatea los mensajes para hacerlos legibles
+   - Publica alertas en un tema SNS
+   - Incluye manejo de errores y logging
+   - Capacidad para simular errores con fines de prueba
+
+2. **Tema SNS**:
+   - Centraliza la distribución de alertas
+   - Permite múltiples suscriptores (email, SMS, otros servicios AWS)
+   - Parametrizado por workspace para separar ambientes
+
+3. **Alarmas CloudWatch**:
+   - Monitoreo de errores de la función Lambda
+   - Monitoreo de duración de ejecución
+   - Notificaciones automáticas cuando se superan umbrales
+
+
+#### Variables Configurables
+
+- **`alert_email`**: Email para recibir notificaciones (opcional)
+- **`timeout`**: Tiempo máximo de ejecución de la Lambda en segundos
+- **`memory_size`**: Memoria asignada a la función Lambda en MB
+- **`log_retention_days`**: Días de retención de logs en CloudWatch
+
+
+#### Pruebas y Depuración
+
+Para probar la función Lambda manualmente:
+
+```bash
+# Invocación normal
+aws lambda invoke --function-name voting-app-alerts-${terraform.workspace} \
+  --payload '{"test":"event"}' \
+  --cli-binary-format raw-in-base64-out response.json
+
+# Invocación con error (para probar el manejo de excepciones)
+aws lambda invoke --function-name voting-app-alerts-${terraform.workspace} \
+  --payload '{"test":"error", "generate_error": true}' \
+  --cli-binary-format raw-in-base64-out error_response.json
+```

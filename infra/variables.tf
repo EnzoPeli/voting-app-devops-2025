@@ -34,3 +34,9 @@ variable "tags" {
     Project     = "voting-app"
   }
 }
+
+variable "alert_email" {
+  description = "Email para recibir alertas (dejar vacío para no configurar)"
+  type        = string
+  default     = ""
+}

@@ -102,3 +102,40 @@ resource "local_file" "private_key" {
   file_permission      = "0600"
   directory_permission = "0700"
 }
+
+# SNS Topic para alertas
+resource "aws_sns_topic" "alerts" {
+  name = "voting-app-alerts-${terraform.workspace}"
+  
+  tags = merge(var.tags, {
+    Name = "voting-app-alerts-${terraform.workspace}"
+    Environment = terraform.workspace
+  })
+}
+
+# Suscripción por email al SNS Topic (opcional)
+resource "aws_sns_topic_subscription" "email" {
+  count     = var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+# Módulo Lambda Alerts
+module "lambda_alerts" {
+  source = "./modules/lambda-alerts"
+  
+  prefix       = "voting-app"
+  sns_topic_arn = aws_sns_topic.alerts.arn
+  lambda_src   = "${path.module}/modules/lambda-alerts/src/alert.py"
+  
+  # Configuración opcional
+  timeout     = 30
+  memory_size = 128
+  log_retention_days = 7
+  
+  tags = merge(var.tags, {
+    Environment = terraform.workspace
+    Component   = "monitoring"
+  })
+}
