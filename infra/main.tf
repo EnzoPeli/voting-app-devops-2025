@@ -77,7 +77,7 @@ module "eks_cluster" {
   subnet_ids          = module.network.public_subnet_ids
   cluster_role_arn    = data.aws_iam_role.lab_role.arn
   node_role_arn       = data.aws_iam_role.lab_role.arn
-  ec2_ssh_key_name    = "voting-key" # o el nombre que uses
+  ec2_ssh_key_name    = "voting-key-${terraform.workspace}" # Parametrizado por workspace
   instance_types      = ["t3.small"]
   desired_capacity    = 2
   min_capacity        = 1
