@@ -15,7 +15,7 @@ spec:
       restartPolicy: Never
       containers:
       - name: seed-data
-        image: 255990283375.dkr.ecr.us-east-1.amazonaws.com/voting-app-seed-data:${NAMESPACE}  
+        image: 255990283375.dkr.ecr.us-east-1.amazonaws.com/voting-app-seed-data-${NAMESPACE}:${NAMESPACE}  
         env:
         - name: POSTGRES_HOST
           value: "db"
