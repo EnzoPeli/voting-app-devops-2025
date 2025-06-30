@@ -119,27 +119,6 @@ Los workflows utilizan namespaces de Kubernetes para aislar los ambientes:
 
 Cada workflow se encarga de crear su respectivo namespace y desplegar los manifiestos en él, utilizando la variable de entorno `NAMESPACE` para parametrizar los despliegues.
 
-## Protección del Ambiente de Producción
-
-Para garantizar deploys seguros a producción:
-
-1. Ve a **Settings → Environments** del repositorio
-2. Crea un nuevo Environment llamado `production`
-3. En **Deployment protection rules**:
-   - Habilita **Required reviewers**
-   - Selecciona los revisores autorizados
-
-Esto establece un quality gate:
-- Los jobs corren automáticamente en push a `main`
-- Los jobs de producción pueden requerir aprobación manual
-- Queda registro de quién aprobó cada deploy
-
-## Ventajas del Enfoque Unificado
-
-- **Secuencia garantizada**: Los jobs se ejecutan en un orden específico, asegurando que la infraestructura exista antes de construir imágenes y que las imágenes existan antes de desplegar.
-- **Flujo completo**: Un solo workflow maneja todo el proceso de CI/CD para cada ambiente.
-- **Simplicidad**: Es más fácil seguir el flujo completo y entender las dependencias.
-- **Consistencia**: Todas las etapas se ejecutan con la misma versión del código.
 
 ## Terraform Workspaces en los Pipelines
 
