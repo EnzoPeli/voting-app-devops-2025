@@ -769,5 +769,6 @@ En el desarrollo de este proyecto se utilizo IA para:
 
 
 
+## Desarrollado por: Enzo Pelizzari 177816
 
 
