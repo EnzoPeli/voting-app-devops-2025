@@ -11,14 +11,14 @@
 7. [Containerización & Docker Compose](#containerización--docker-compose)  
 8. [Serverless](#serverless)  
 9. [Observabilidad](#observabilidad)  
-10. [Próximos Pasos](#próximos-pasos)
+10. [Lecciones Aprendidas](#lecciones-aprendidas)
 
 
 
 ## Visión General
 
-> Este proyecto busca aplicar DevOps, para asegurar despliegues fiables en tres ambientes (Dev, Test y Prod). 
-> Abarca:
+> Este proyecto aplica técnicas de DevOps, para despliegues en tres ambientes (Dev, Test y Prod). 
+> - Se utilizan:
 > - Infraestructura como Código con Terraform  
 > - Pipelines de CI/CD en GitHub Actions  
 > - Containerización de microservicios y orquestación  
@@ -38,18 +38,21 @@ voting-app-devops-2025/
 ├── infra/          # Módulos y root de Terraform
 ├── k8s/            # Manifiestos de Kubernetes para despliegue en EKS
 ├── .github/        # Workflows de GitHub Actions
-├── serverless/     # Funciones Lambda
 ├── docs/           # Imágenes, diagramas y guías adicionales
 └── README.md       # Documentación principal del proyecto
 ```
 
 ## Estrategia de Branching
 
+### Diagrama de Ramas
+
+![Diagrama de Ramas](docs/branching.png)
+
 Para gestionar los tres entornos (Dev, Test y Prod) usamos un flujo de ramas:
 
 - **Ramas principales**  
-  - `develop`: integraciones y despliegue automático a Dev.  
-  - `test`: despliegue a Test tras aprobar quality gates.  
+  - `develop`: Análisis estático, despliegue automático a Dev.  
+  - `test`: Pruebas de integración, despliegue automático a Test.  
   - `main`: despliegue a Prod, puede usarse con tagging semántico (`vX.Y.Z`).
 
 - **Feature branches**  
@@ -62,7 +65,7 @@ Para gestionar los tres entornos (Dev, Test y Prod) usamos un flujo de ramas:
   - Al terminar, push y PR a `develop`; debe pasar el CI de Dev y la revisión de un reviewer.
 
 - **Promoción de cambios**  
-  1. **Dev → Test**: abrir PR `develop → test`, aprobar gates en Test (pruebas de integración, carga, etc.), mergear.  
+  1. **Dev → Test**: abrir PR `develop → test`, aprobar gates en Test (pruebas de integración), mergear.  
   2. **Test → Prod**: abrir PR `test → main`, aprobar gates de seguridad y despliegue, mergear y taguear.
 
 ## Kanban & Flujo de Trabajo
@@ -117,22 +120,32 @@ infra/
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   └── outputs.tf
-│   └── eks_cluster/      # Módulo para crear el cluster EKS
-│       ├── main.tf
-│       ├── variables.tf
-│       └── outputs.tf
+│   ├── eks_cluster/      # Módulo para crear el cluster EKS
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── lambda-alerts/    # Módulo para crear la función Lambda
+│   │   ├── main.tf 
+│   │   ├── variables.tf
+│   │   └── outputs.tf
 │
 ├── main.tf               # Root module: orquesta los módulos
 ├── variables.tf          # Variables globales (env, región, CIDRs, etc.)
 ├── outputs.tf            # Outputs del proyecto (vpc_id, sg_id, ecr_url, …)
 ├── dev.tfvars            # Valores de variables para entorno Dev
-└── tfplan                # (opc.) Plan generado para revisión
+├── test.tfvars           # Valores de variables para entorno Test
+├── prod.tfvars           # Valores de variables para entorno Prod
+├── tfplan                # (opc.) Plan generado para revisión
+├── eks_monitoring.tf     # Módulo para crear alarma de CloudWatch
+
+
+
 ```
 
 ### Módulos
 
 #### ecr-repo (infra/modules/ecr-repo)
-- Define repositorios AWS ECR para los servicios
+- Definicion de  repositorios AWS ECR para los servicios
 - Variables:
   - `name`: Nombre del repositorio ECR
   - `tags`: Etiquetas a aplicar al repositorio (opcional)
@@ -156,43 +169,80 @@ infra/
 - Outputs: `sg_id`
 
 #### eks_cluster (infra/modules/eks_cluster)
-- Crea un cluster EKS y un grupo de nodos para ejecutar la aplicación, 
+- Crea un cluster EKS y un grupo de nodos para ejecutar la aplicación
 - Variables:
   - `cluster_name`: Nombre del cluster EKS
   - `node_group_name`: Nombre del grupo de nodos
-  - `cluster_role_arn`: ARN del rol IAM para el plano de control
-  - `node_role_arn`: ARN del rol IAM para los nodos trabajadores
-  - `subnet_ids`: Lista de IDs de subnets donde se desplegará el cluster
-  - `ec2_ssh_key_name`: Nombre de la clave SSH para acceso a los nodos
-  - `instance_types`: Tipos de instancia para los nodos (default: ["t3.small"])
-  - `desired_capacity`, `min_capacity`, `max_capacity`: Configuración de auto-scaling
-  - `node_security_group_ids`: IDs de los security groups para los nodos
+  - `subnet_ids`: IDs de las subnets donde se desplegará el cluster
+  - `cluster_role_arn`: ARN del rol IAM para el cluster
+  - `node_role_arn`: ARN del rol IAM para los nodos
+  - `ec2_ssh_key_name`: Nombre de la clave SSH para acceder a los nodos
+  - `instance_types`: Lista de tipos de instancia para los nodos
+  - `desired_capacity`: Capacidad deseada del grupo de nodos
+  - `min_capacity`: Capacidad mínima del grupo de nodos
+  - `max_capacity`: Capacidad máxima del grupo de nodos
+  - `tags`: Etiquetas a aplicar a los recursos
 - Outputs: `cluster_name`, `cluster_endpoint`, `cluster_certificate_authority`, `node_group_name`
+
+#### lambda-alerts (infra/modules/lambda-alerts)
+- Crea una función Lambda para procesar y enviar alertas a través de SNS
+- Variables:
+  - `prefix`: Prefijo para nombrar los recursos (default: "alerts")
+  - `sns_topic_arn`: ARN del tema SNS donde se publicarán las alertas
+  - `lambda_src`: Ruta al archivo Python de la función Lambda
+  - `timeout`: Tiempo máximo de ejecución en segundos (default: 30)
+  - `memory_size`: Memoria asignada a la función en MB (default: 128)
+  - `log_retention_days`: Días de retención de logs (default: 7)
+  - `tags`: Etiquetas a aplicar a los recursos
+- Outputs: `function_name`, `function_arn`, `errors_alarm_name`, `duration_alarm_name`
 
 ### Root Module
 
-En `infra/main.tf` se invocan los módulos y se pasan las variables:
+En `infra/main.tf` se invocan los módulos y se pasan las variables. Los recursos están parametrizados por workspace para separar ambientes (dev, test, prod):
 
 ```hcl
-# Repositorio ECR para el servicio vote
+# Repositorios ECR parametrizados por workspace
 module "ecr_vote" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-vote"
-  tags   = var.tags
+  name   = "voting-app-vote-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
 }
 
-# Repositorio ECR para el servicio result
 module "ecr_result" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-result"
-  tags   = var.tags
+  name   = "voting-app-result-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
 }
 
-# Repositorio ECR para el servicio seed-data
 module "ecr_seed" {
   source = "./modules/ecr-repo"
-  name   = "voting-app-seed-data"
-  tags   = var.tags
+  name   = "voting-app-seed-data-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
+}
+
+module "ecr_worker" {
+  source = "./modules/ecr-repo"
+  name   = "voting-app-worker-${terraform.workspace}"
+  tags   = merge(var.tags, { Environment = terraform.workspace })
+}
+
+# Módulo Lambda Alerts para monitoreo y alertas
+module "lambda_alerts" {
+  source = "./modules/lambda-alerts"
+  
+  prefix       = "voting-app"
+  sns_topic_arn = aws_sns_topic.alerts.arn
+  lambda_src   = "${path.module}/modules/lambda-alerts/src/alert.py"
+  
+  # Configuración opcional
+  timeout     = 30
+  memory_size = 128
+  log_retention_days = 7
+  
+  tags = merge(var.tags, {
+    Environment = terraform.workspace
+    Component   = "monitoring"
+  })
 }
 
 # Repositorio ECR para el servicio worker
@@ -233,13 +283,17 @@ module "eks_cluster" {
 }
 
 
+
+
 ```
 
-Los outputs de todos los módulos se exponen en `infra/outputs.tf`.
+Los outputs de todos los módulos se encuentran en `infra/outputs.tf`.
 
 ### Backend Remoto
 
 El estado remoto de Terraform se configura directamente en `infra/main.tf` con un backend S3:
+
+Con el uso de workspaces, Terraform automáticamente separa los estados por ambiente (`env:/workspace`) dentro del mismo bucket.
 
 ```hcl
 terraform {
@@ -254,7 +308,7 @@ terraform {
 
 ### Creacion de Bucket para Terraform State (CLI)
 
-Para crear el bucket y la tabla de DynamoDB para el estado de Terraform, puedes usar el siguiente script:
+Para crear el bucket y la tabla de DynamoDB para el estado de Terraform, se puede ejecutar el siguiente script:
 ```bash
 export AWS_PROFILE=default
 export AWS_REGION=us-east-1
@@ -279,17 +333,16 @@ aws dynamodb create-table \
 - **region**: `us-east-1`
 - **dynamodb_table**: `terraform-locks` (para locking de estado)
 
-### Estado Actual en AWS
-
-![Infraestructura Dev](docs/infra-dev.png)
-
-> **Nota**: La captura anterior muestra la VPC y sus subnets en AWS Console, confirmando que Terraform aplicó correctamente los recursos en el entorno Dev.
 
 ### Variables por Ambiente
 
+El proyecto utiliza archivos de variables específicos para cada ambiente, lo que permite personalizar la configuración según cada entorno:
+
 - `infra/dev.tfvars`
-- `infra/test.tfvars` (pendiente)
-- `infra/prod.tfvars` (pendiente)
+- `infra/test.tfvars`
+- `infra/prod.tfvars`
+
+Estos archivos se utilizan en combinación con los workspaces de Terraform para mantener configuraciones independientes. Los pipelines de CI/CD seleccionan automáticamente el archivo de variables correspondiente al ambiente que se está desplegando.
 
 ### Comandos Útiles
 
@@ -339,55 +392,14 @@ Antes de ejecutar los pipelines de CI/CD o trabajar con Terraform manualmente, e
 
 > **Nota**: Los pipelines de CI/CD están configurados para crear los workspaces automáticamente si no existen, pero es recomendable crearlos manualmente la primera vez para verificar que todo funcione correctamente.
 
-#### Características de los Workspaces
-
-- **Estados separados**: Cada workspace tiene su propio archivo de estado en S3, siguiendo el patrón `s3://voting-app-terraform-state-177816/voting-app/env:/WORKSPACE/terraform.tfstate`.
-- **Recursos parametrizados**: Los recursos críticos como repositorios ECR incluyen el nombre del workspace en su identificador para evitar conflictos entre ambientes:
-  ```hcl
-  module "ecr_vote" {
-    source = "./modules/ecr-repo"
-    name   = "voting-app-vote-${terraform.workspace}"
-    tags   = merge(var.tags, { Environment = terraform.workspace })
-  }
-  ```
-- **Aislamiento completo**: Cada ambiente opera de forma independiente, con sus propios recursos y configuraciones.
-
-#### Uso de Workspaces
-
-##### Uso manual
-
-Para trabajar con workspaces manualmente:
-
-1. **Listar workspaces disponibles**:
-   ```bash
-   terraform workspace list
-   ```
-
-2. **Crear un nuevo workspace** (si no existe):
-   ```bash
-   terraform workspace new dev
-   ```
-
-3. **Seleccionar un workspace existente**:
-   ```bash
-   terraform workspace select dev
-   ```
-
-4. **Ver el workspace actual**:
-   ```bash
-   terraform workspace show
-   ```
-
-> **IMPORTANTE**: Antes de aplicar Terraform manualmente, asegúrate siempre de estar en el workspace correcto usando `terraform workspace show`.
-
-
 ## CI/CD
 
-La aplicación utiliza GitHub Actions para automatizar el proceso de CI/CD, con flujos de trabajo específicos para cada ambiente.
+El proyecto utiliza GitHub Actions para automatizar el proceso de CI/CD, con flujos para cada ambiente.
 
-### Pipelines de CI/CD
 
-El proyecto implementa una estrategia de CI/CD con pipelines unificados por ambiente:
+### Diagrama de Flujos
+
+![Pipeline CI/CD Diagram](docs/pipeline-diagram.png)
 
 #### Flujo de Despliegue Automatizado
 
@@ -412,19 +424,8 @@ El proceso de CI/CD está configurado para desplegar automáticamente en el ento
    - Aplica la infraestructura con Terraform usando `prod.tfvars`
    - Construye y publica las imágenes Docker con tag `:prod`
    - Despliega la aplicación en el namespace `prod`
-   - Utiliza protecciones adicionales del entorno `production`
 
 Para más detalles sobre los workflows, consulta [docs/workflows.md](docs/workflows.md).
-
-#### Ventajas de este Enfoque
-
-- **Aislamiento**: Cada entorno opera de forma independiente sin interferir con otros
-- **Consistencia**: Mismos manifiestos para todos los entornos, reduciendo duplicación
-- **Trazabilidad**: Clara separación entre versiones de desarrollo, test y producción
-- **Facilidad de gestión**: Comandos kubectl pueden filtrarse por namespace
-- **Seguridad**: Posibilidad de aplicar diferentes políticas de RBAC por entorno
-- **Secuencia garantizada**: Los jobs se ejecutan en un orden específico, asegurando dependencias correctas
----
 
 > **Variables / Secrets** necesarios:  
 > - `AWS_ACCESS_KEY_ID`  
@@ -511,22 +512,15 @@ k8s/
 
 Para la exposición de los servicios de la aplicación (Vote y Result), se ha optado por utilizar servicios de tipo LoadBalancer en lugar de un Ingress Controller por las siguientes razones:
 
-1. **Simplicidad operativa**: Cada aplicación tiene su propio punto de entrada con su propia dirección IP/DNS, lo que simplifica la configuración y el diagnóstico de problemas.
-
-2. **Compatibilidad con las aplicaciones**: Las aplicaciones Vote y Result están diseñadas para ejecutarse en la raíz (`/`), lo que causaba conflictos al intentar exponerlas bajo diferentes rutas (`/vote` y `/result`) mediante Ingress.
-
-3. **Evitar problemas con recursos estáticos**: Al usar LoadBalancer, cada aplicación se ejecuta en su propia raíz, evitando problemas con las rutas relativas de los recursos estáticos (CSS, JavaScript).
-
-4. **Aislamiento**: Cada servicio está completamente aislado, lo que facilita la gestión independiente de cada componente.
+Las aplicaciones Vote y Result están diseñadas para ejecutarse en la raíz (`/`), lo que causaba conflictos al intentar exponerlas bajo diferentes rutas (`/vote` y `/result`) mediante Ingress.
+Al usar LoadBalancer, cada aplicación se ejecuta en su propia raíz, evitando problemas con las rutas relativas de los recursos estáticos (CSS, JavaScript).
 
 **Funcionamiento**:
 
 - Cada servicio (Vote y Result) tiene su propio balanceador de carga AWS que recibe tráfico externo.
 - El tráfico se dirige directamente a los pods correspondientes sin necesidad de reescritura de rutas.
-- Los usuarios acceden a cada aplicación a través de diferentes URLs (direcciones IP o DNS asignadas por AWS).
-- Internamente, los servicios Redis y PostgreSQL se mantienen como ClusterIP, accesibles solo dentro del clúster.
-
-**Consideraciones de costo**: Esta arquitectura implica múltiples balanceadores de carga, lo que puede aumentar los costos en AWS. Para entornos de desarrollo o pruebas donde el costo es una preocupación, se podría considerar el uso de servicios NodePort o un único Ingress Controller con configuración adecuada.
+- Se accede a cada aplicación a través de diferentes URLs (direcciones IP o DNS asignadas por AWS).
+- Los servicios Redis y PostgreSQL se mantienen como ClusterIP, accesibles solo dentro del clúster.
 
 ### Componentes de la Aplicación
 
@@ -545,7 +539,7 @@ Para la exposición de los servicios de la aplicación (Vote y Result), se ha op
 
 4. **db**: Base de datos PostgreSQL
    - Deployment: 1 réplica con imagen oficial de PostgreSQL
-   - Volumen: emptyDir (almacenamiento efímero, los datos se pierden al reiniciar el pod)
+   - Volumen: emptyDir (los datos se pierden al reiniciar el pod)
    - Service: Expone el puerto 5432 internamente
 
 5. **result**: Frontend para mostrar resultados (Node.js)
@@ -560,8 +554,8 @@ Para la exposición de los servicios de la aplicación (Vote y Result), se ha op
 Para desplegar la aplicación en el cluster EKS:
 
 ```bash
-# Configurar kubectl para conectar con el cluster EKS
-aws eks update-kubeconfig --name voting-cluster --region us-east-1
+# Configurar kubectl para conectar con el cluster EKS (reemplazar WORKSPACE con dev, test o prod)
+aws eks update-kubeconfig --name voting-cluster-WORKSPACE --region us-east-1
 
 # Verificar conexión
 kubectl get nodes
@@ -581,10 +575,9 @@ kubectl apply -f k8s/seed-data/
 # Verificar estado
 kubectl get pods
 kubectl get services
-kubectl get ingress
 ```
 
-> **Nota**: Los Ingress requieren un controlador de Ingress como NGINX Ingress Controller instalado en el cluster.
+> **Nota**: Los servicios Vote y Result son de tipo LoadBalancer y generan automáticamente balanceadores de carga en AWS con direcciones IP públicas. Puedes obtener las URLs de acceso con `kubectl get services`.
 
 ### Estrategia de Despliegue Multi-entorno
 
@@ -619,45 +612,36 @@ NAMESPACE=prod ./scripts/apply-manifests.sh  # Para producción
 
 #### Flujo de Despliegue Automatizado
 
-El proceso de CI/CD está configurado para desplegar automáticamente en el entorno correspondiente:
+El proceso de CI/CD está configurado para desplegar automáticamente en el entorno correspondiente utilizando workspaces de Terraform:
 
-1. **Workflow `terraform-dev.yml`**:
+1. **Workflow `ci-dev.yml`**:
    - Se ejecuta al hacer push a la rama `develop`
+   - Selecciona el workspace `dev` de Terraform
    - Aplica la infraestructura con Terraform usando `dev.tfvars`
-   - Despliega la aplicación en el namespace `dev` con las imágenes etiquetadas como `dev`
+   - Construye y publica las imágenes Docker con tag `:dev` a los repositorios ECR con sufijo `-dev`
+   - Despliega la aplicación en el cluster EKS del workspace `dev`
 
-2. **Workflow `terraform-test.yml`**:
+2. **Workflow `ci-test.yml`**:
    - Se ejecuta al hacer push a la rama `test`
+   - Selecciona el workspace `test` de Terraform
    - Aplica la infraestructura con Terraform usando `test.tfvars`
-   - Despliega la aplicación en el namespace `test` con las imágenes etiquetadas como `test`
+   - Construye y publica las imágenes Docker con tag `:test` a los repositorios ECR con sufijo `-test`
+   - Despliega la aplicación en el cluster EKS del workspace `test`
 
-3. **Workflow `terraform-prod.yml`**:
+3. **Workflow `ci-prod.yml`**:
    - Se ejecuta al hacer push a la rama `main`
+   - Selecciona el workspace `prod` de Terraform
    - Aplica la infraestructura con Terraform usando `prod.tfvars`
-   - Despliega la aplicación en el namespace `prod` con las imágenes etiquetadas como `prod`
+   - Construye y publica las imágenes Docker con tag `:prod` a los repositorios ECR con sufijo `-prod`
+   - Despliega la aplicación en el cluster EKS del workspace `prod`
+
+4. **Workflow `destroy-environment.yml`**:
+   - Workflow manual que permite destruir un entorno específico
+   - Selecciona el workspace de Terraform correspondiente al entorno
+   - Ejecuta `terraform destroy` para eliminar toda la infraestructura del entorno seleccionado
 
 
 
-#### Ventajas de este Enfoque
-
-- **Aislamiento**: Cada entorno opera de forma independiente sin interferir con otros
-- **Consistencia**: Mismos manifiestos para todos los entornos, reduciendo duplicación
-- **Trazabilidad**: Clara separación entre versiones de desarrollo, test y producción
-- **Facilidad de gestión**: Comandos kubectl pueden filtrarse por namespace
-- **Seguridad**: Posibilidad de aplicar diferentes políticas de RBAC por entorno
-
-> **Nota**: El archivo `.env` contiene las variables de entorno necesarias para los servicios:
-> - Credenciales de PostgreSQL
-> - Configuración de Redis
-> - Puertos de servicios
-> Se creo  el .evn como muestra de una practica de seguridad.
-
-## Pruebas locales con Docker Compose
-
-Seguir los pasos anteriores en la sección "Levantar el stack local" para probar la aplicación. Los servicios estarán disponibles en:
-
-- Interfaz de votación: http://localhost:8080
-- Interfaz de resultados: http://localhost:8081
 
 ## Serverless
 
@@ -704,7 +688,7 @@ El sistema actualmente monitorea dos escenarios específicos:
 
 5. **SNS distribuye la notificación** - Los suscriptores reciben un email con el asunto "ALARM: EKS CPU Utilization Alert".
 
-6. **El equipo recibe la alerta y actúa** - Los operadores pueden revisar el dashboard CloudWatch `eks-monitoring-${terraform.workspace}` para analizar las métricas de CPU (promedio y percentiles p50/p95) y tomar las acciones necesarias.
+6. **El equipo recibe la alerta y actúa** - Se puede revisar el dashboard CloudWatch `eks-monitoring-${terraform.workspace}` para analizar las métricas de CPU (promedio y percentiles p50/p95) y tomar las acciones necesarias.
 
 
 
@@ -715,7 +699,7 @@ El sistema actualmente monitorea dos escenarios específicos:
    - Formatea los mensajes para hacerlos legibles
    - Publica alertas en un tema SNS
    - Incluye manejo de errores y logging
-   - Capacidad para simular errores con fines de prueba
+   - Capacidad para simular errores para prueba
 
 2. **Tema SNS**:
    - Centraliza la distribución de alertas
@@ -755,3 +739,35 @@ aws lambda invoke --function-name voting-app-alerts-${terraform.workspace} \
   --payload '{"test":"error", "generate_error": true}' \
   --cli-binary-format raw-in-base64-out error_response.json
 ```
+
+### Diagrama de Arquitectura Cloud
+
+![Diagrama de Arquitectura](docs/infra-cloud.png)
+
+## Lecciones Aprendidas
+
+Durante el desarrollo de este proyecto, se adquirieron lecciones valiosas y experiencias, de esto se hace un resumen a continuación:
+
+
+1. **De Ingress a LoadBalancer**: Inicialmente implemente NGINX Ingress como punto de entrada único, pero me encontré con complejidades por como estaba pensado el proyecto, tanto vote como result estaban pensado para correr en /. finalimente decidí pasar a servicios tipo LoadBalancer, lo que simplificó la arquitectura.
+
+2. **Persistencia**: Comencé con PVC para la base de datos (pvc es el recurso que se encarga de la persistencia de los datos en el cluster), no se logro implementar, por lo que se optó por emptyDir, de esta manera los datos se pierden al reiniciar el pod.
+
+3. **Parametrización por Workspace**: La implementación de workspaces de Terraform fue un cambio  que  permitió manejar múltiples ambientes con el mismo código base. Aunque requirió refactorizar varios recursos para incluir `${terraform.workspace}` en sus nombres, finalmente se logro una separación clara entre ambientes.
+
+4. **Consistencia en Nombres de Recursos**: Mantener la coherencia en la nomenclatura entre Terraform, pipelines de CI/CD y manifiestos de Kubernetes fue un desafío constante. La solución fue parametrizar todo con variables de entorno y workspaces.
+
+
+### Reconocimiento del uso de IA
+
+En el desarrollo de este proyecto se utilizo IA para:
+- Correccion y generacion de documentacion en formato correcto para ajustarme facilmente al markdown.
+- Consultas sobre problemas de sintaxis y correccion de errores.
+- Consultas sobre errores durante el proceso de despliegue, con el fin de facilitar la depuracion y solucion de problemas.
+- Consultas sobre la implementacion de ciertas funcionalidades, como la creacion de alarmas en CloudWatch y el envio de notificaciones a SNS.
+- IA utilizada: ChatGPT 4o
+
+
+
+
+
