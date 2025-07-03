@@ -766,9 +766,3 @@ En el desarrollo de este proyecto se utilizo IA para:
 - Consultas sobre errores durante el proceso de despliegue, con el fin de facilitar la depuracion y solucion de problemas.
 - Consultas sobre la implementacion de ciertas funcionalidades, como la creacion de alarmas en CloudWatch y el envio de notificaciones a SNS.
 - IA utilizada: ChatGPT 4o
-
-
-
-## Desarrollado por: Enzo Pelizzari 177816
-
-
